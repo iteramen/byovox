@@ -9,6 +9,8 @@ went public; their notes are kept below.
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-10
+
 Changed
 - byovox is licensed under PolyForm Noncommercial 1.0.0, replacing MIT. Personal use and
   noncommercial organisations are free; any commercial use needs a license:
