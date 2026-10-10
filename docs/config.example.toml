@@ -1,0 +1,298 @@
+# byovox configuration.
+#
+# Every key is optional and shown here at its default; delete anything you do not
+# change. Unknown keys are an error, so a typo fails loudly instead of silently doing
+# nothing. Secrets never go in this file: name an environment variable instead.
+#
+# Three keys have no default byovox could guess and are required before anything runs:
+# stt.base_url, and — while polish is enabled — polish.base_url and polish.model. Fill them
+# in here, or run `byovox setup` to be asked for these, have each answer probed against the
+# server as you give it, and get this file back with your answers in it.
+#
+# Location: %APPDATA%\byovox\config\config.toml (Windows), ~/.config/byovox/config.toml
+# (Linux), ~/Library/Application Support/byovox/config.toml (macOS).
+# `byovox config` prints the effective value of every key and where it came from.
+
+[stt]
+# OpenAI-compatible base URL; byovox posts to {base_url}/audio/transcriptions.
+# Plain http:// to anywhere but this machine puts your voice, your transcript and your
+# bearer token on the wire in clear, and lets anyone on the path replace the reply with
+# text byovox will type into your window. `byovox check` prints a `warn network` row for
+# such an endpoint and the daemon logs one at startup; neither is fatal, because http://
+# across a WireGuard or Tailscale link is a reasonable choice. Over anything else, use
+# https:// — note that byovox verifies against the bundled Mozilla roots, not the Windows
+# certificate store, so a privately-signed certificate will not be accepted.
+# Required: byovox refuses to start until this names your server, e.g.
+# "http://127.0.0.1:8770/v1" for a whisper.cpp server on this machine. Ollama cannot serve
+# this stage — its runner refuses whisper models and answers HTTP 500 — but `byovox setup`
+# finds a local Ollama by itself and offers the models it has pulled for [polish] below.
+base_url = ""
+# Sent as the `model` field. Self-hosted whisper.cpp ignores it; hosted APIs need a real name.
+model = "whisper-1"
+# Says that base_url above is a service somebody else runs, so `byovox check` can print a
+# `note hosted` row naming it. It changes no request and is not a security setting — it is
+# the record of a choice, because no URL can be read for this: https:// to your own tailnet
+# is not hosted, and a hosted API behind a local gateway alias does not look hosted. A
+# hosted speech endpoint receives your audio. `byovox setup` writes this key for you.
+hosted = false
+# Name of an environment variable holding a bearer token. Empty = no Authorization header
+# (right for a server that authenticates by network identity).
+api_key_env = ""
+# Optional KEY=VALUE file consulted for that variable name when it is unset in the
+# environment (a place to keep one token shared with other tools). It holds a live
+# credential in plain text and byovox neither checks nor changes its permissions: keep it
+# readable by you alone (Windows: Properties > Security, remove the inherited groups;
+# Linux/macOS: chmod 600).
+api_key_file = ""
+# Vocabulary priming sent as the whisper `prompt` on every request. Names and jargon
+# whisper would otherwise mangle, e.g. "Glossary: Acme, Kubernetes, Postgres, LiteLLM".
+# The polish stage reads the same list: a listed tool, product or UI control that whisper
+# wrote in Hebrew or Cyrillic letters (גרפנה, רדיס) comes back in Latin script. Technical
+# terms only: people's names stay in the language being spoken, and an ordinary word that
+# sounds like a listed name is left alone.
+prompt = ""
+# Whole-request timeout in seconds.
+timeout_s = 30
+# Seconds to wait for the connection itself, counted inside `timeout_s`. Raise it when a
+# slow VPN or a roaming link is slow to open a connection.
+connect_timeout_s = 5
+# Drop a transcript whisper itself scored as silence. Over near-silent audio whisper
+# invents a stock phrase — "Thank you for watching!", "תודה." — but reports its own doubt
+# as `no_speech_prob` on every segment. byovox weighs each segment's score by its duration
+# and discards a transcript whose mean is above this. The probability decides, never the
+# text, so a real one-word utterance is never dropped for what it happens to say. Measured
+# here: gated hallucinations are single segments scoring 0.54 to 0.88; real speech has
+# scored up to 0.443 on a single segment, and 0.494 on segments of a 44 s clip whose
+# weighted mean was 0.264 — a real short clip can still score above 0.3 and be dropped.
+# A server that sends no segments scores nothing and is never gated. Reading the score
+# needs `response_format=verbose_json`, which a few servers refuse (`gpt-4o-transcribe`
+# takes `json` and `text` only): 0.0 turns the gate off, and language-detection routing
+# with it (see [stt.by_language]), and asks for plain `json`, which is the setting such a
+# server needs — set `no_speech_warn = 0.0` with it, since the warning cue reads the same
+# scores.
+# Separately, and whatever this is set to, a capture with no 10 ms window above -40 dBFS (a
+# muted or dead microphone) is discarded before any request: whisper can type a stock phrase
+# over it with a score this gate trusts.
+no_speech_threshold = 0.3
+
+# Play the warning cue when any segment of a *kept* transcript scores above this — a
+# doubtful stretch is where whisper mishears clipped audio and hallucinates over quiet
+# audio. The text still types; the cue says "proofread me". 0.0 turns the warning off.
+no_speech_warn = 0.08
+
+[stt.server]
+# A speech server on this machine for the daemon to start. Empty `command` = byovox starts
+# nothing. The daemon starts `command` with `args` when it starts, with no console window,
+# and ends it when the daemon exits, crashes or is killed. Nothing restarts it: a server that
+# exits is one WARN in the log with its exit code, and dictation then fails at `stt`.
+# `command` is an absolute path to an existing file (on Windows an .exe), or the daemon
+# refuses to start. Each `args` item reaches the server as one argument, as written: no
+# shell, no splitting on spaces. byovox does not read the port from `args`, so stt.base_url
+# above must still point at this server. `byovox setup` writes both keys, and stt.base_url,
+# when you accept its whisper.cpp download. A whisper.cpp server, in TOML literal strings,
+# where a backslash needs no escaping:
+#   command = 'C:\tools\whisper\whisper-server.exe'
+#   args = ['-m', 'C:\tools\whisper\ggml-large-v3-turbo.bin', '--host', '127.0.0.1', '--port', '8770', '-l', 'auto', '--inference-path', '/v1/audio/transcriptions']
+command = ""
+args = []
+
+# Per-language endpoints. With language.default = "auto" and no_speech_threshold above 0
+# every dictation goes to [stt] first. When whisper detects a lane's language with
+# probability 0.5 or more, the dictation is sent again, with `language=<code>`, to that
+# lane. Below 0.5, or when the reply carries no probabilities, the language the layout maps
+# to in [language.by_layout] is sent with `language=<code>`: to its lane if it has one,
+# otherwise to [stt] again. When [stt] fails, that language is sent to its lane if it has
+# one. Otherwise the [stt] reply, or its error, stands. Detection is read from the
+# `verbose_json` reply, so it needs no_speech_threshold above 0; at 0 the mapped layout's
+# language is sent in one request, to its lane when it has one. With an explicit
+# language.default, the forced language goes straight to its lane when it has one,
+# otherwise to [stt].
+# A lane is the same server family with a different model — the timeouts,
+# no_speech_threshold and no_speech_warn above apply (so a lane's server must take the same
+# `response_format` as [stt]'s: with the gate on, both get `verbose_json`), and `model` /
+# `prompt` inherit when empty; a lane `prompt` also joins the polish stage's glossary rule.
+# `base_url` is required.
+# The token is not inherited: a lane sends none unless it names its own `api_key_env` (and
+# optional `api_key_file`, read as [stt]'s pair is) or sets `inherit_token = true`, which
+# sends [stt]'s. Setting both is refused. `byovox setup` sets `inherit_token = true` on a
+# lane with [stt]'s scheme, host and port when [stt] has an `api_key_env`.
+# A lane reply with no text is retried on [stt] (a one-word clip can come back empty from
+# a fine-tuned model); a lane error is an error, reported as `stt[<code>]`. Example — a
+# Hebrew fine-tune behind its own path on the same server:
+#   [stt.by_language.he]
+#   base_url = "http://127.0.0.1:8770/he/v1"
+#   model = ""
+#   prompt = ""
+#   api_key_env = ""
+#   inherit_token = false
+[stt.by_language]
+
+[language]
+# "auto" = let the server detect (no `language` field is sent) and route on what it
+# detects — see [stt.by_language]. A whisper.cpp server must then run with `-l auto`, or
+# its own default applies. Or an ISO 639-1 code to force one for layouts not listed in
+# by_layout, or when the layout cannot be read.
+default = "auto"
+# With default = "auto": restrict detection to these ISO 639-1 codes; every
+# [stt.by_language] code the list lacks is added. Sent as the whisper.cpp-server extension
+# field `language_candidates`; servers without it ignore the field. Empty = not sent.
+candidates = []
+# Keyboard layout language (ISO 639-1) -> STT language. The layout of the window you
+# are dictating into is read when you press the key. With default = "auto" it is a hint,
+# used as [stt.by_language] above sets out. With an explicit default it forces the
+# language.
+[language.by_layout]
+# he = "he"
+
+[polish]
+# Send the transcript through a chat model that adds punctuation and removes fillers.
+# If this stage fails for any reason the raw transcript is typed instead.
+enabled = true
+# OpenAI-compatible base URL; byovox posts to {base_url}/chat/completions. Required while
+# enabled = true, e.g. "http://127.0.0.1:4000/v1" for a LiteLLM or llama.cpp server here.
+base_url = ""
+# The model name (or gateway alias) to send. Required while enabled = true.
+model = ""
+# As `stt.hosted`, for the stage that sees every dictation's text: set it when base_url above
+# is a service somebody else runs, and `byovox check` says so in a `note hosted` row.
+hosted = false
+# Environment variable holding the bearer token for the gateway.
+api_key_env = ""
+# As `stt.api_key_file`.
+api_key_file = ""
+# Skip polish for utterances shorter than this many words (0 = always polish).
+min_words = 0
+# Capitalise the first word of a dictation. A dictation usually lands mid-sentence, so the
+# capital is often unwanted — but it cannot simply be lowered afterwards, because the first
+# word may be a name, an acronym or "I". So this is a prompt-level setting: `false` swaps
+# rule 1 of the built-in prompt for one that lower-cases the first word unless it would
+# carry a capital anywhere in a sentence. A `prompt_file` below owns its own rule 1 and is
+# never rewritten, and the raw fallback (polish down) keeps whisper's capital either way.
+capitalize_first_word = true
+# Path to a file replacing the built-in system prompt. Empty = built-in. The glossary rule
+# from `stt.prompt` (and any lane's `prompt`) is still appended after it.
+prompt_file = ""
+timeout_s = 20
+# As `stt.connect_timeout_s`.
+connect_timeout_s = 5
+
+[hotkey]
+# `byovox hotkey --set <key>` changes this line without an editor, and refuses a key another
+# application has already registered system-wide; `byovox hotkey --list` names every one.
+# One W3C UI Events `code` name — bare modifiers work on Windows —
+# or a chord: Modifier+...+Key, e.g. "ControlLeft+ShiftLeft+Z". Every element but the last
+# must be held down; the last one triggers on top of them. A held element still does whatever
+# it normally does — any accepted name may be a modifier, so a chord on CapsLock toggles caps
+# every time you use it.
+# Accepted, in full: ControlLeft, ControlRight, AltLeft, AltRight, ShiftLeft, ShiftRight,
+# MetaLeft, MetaRight, CapsLock, ScrollLock, Pause, Insert, Escape, F13, F14, F15, F16, F17,
+# F18, F19, F20, F21, F22, F23, F24 — plus the letters A-Z and the digits 0-9, accepted only
+# as a chord's last element (a bare letter as the hotkey would swallow every one you type).
+# Anything else is refused at startup and by `byovox check`.
+# A chord's trigger is swallowed: the focused window never sees the combination, so
+# ControlLeft+ShiftLeft+Z does not also reach the editor underneath. The modifiers themselves
+# pass through untouched.
+# A letter names a virtual key, which the active layout assigns. A non-Latin layout keeps the
+# US assignments, so Z is the key a US layout labels Z on a Cyrillic or Hebrew layout too,
+# where it types я or ז; another Latin layout follows its own printed letters instead — on
+# QWERTZ, Z is the key QWERTY labels Y.
+key = "ControlRight"
+# "hold": press = record, release = send. "toggle": press to start, press again to send.
+# A chord in "hold" means holding all of it — the modifiers and the trigger — while you
+# speak; letting go of any one of them ends the recording.
+mode = "hold"
+# A hold shorter than this is an accidental tap: discarded, no request made.
+min_hold_ms = 250
+# Pressing this while recording discards the recording.
+cancel_key = "Escape"
+
+[inject]
+# How text reaches the focused window.
+#   auto           first working method for this platform (type on Windows)
+#   type           synthesise keystrokes (Windows: SendInput unicode)
+#   paste          put the text on the clipboard, send Ctrl+V, restore the clipboard
+#   clipboard-only put the text on the clipboard and play the done cue; you paste
+# Naming a method the platform cannot provide is a startup error.
+mode = "auto"
+# Append a space after the inserted text.
+trailing_space = false
+# Drop exactly one period from the end of the text before typing. Whisper and the cleanup
+# model both end a sentence with one, but a dictation usually lands mid-sentence; `false`
+# types the period as it came. An ellipsis is never touched either way.
+strip_terminal_period = true
+# Longest transcript, in characters, that byovox will type. A reply over this is NOT
+# truncated — it is held for `byovox last` with the error cue, the same as a dictation no
+# injection method could place, so nothing you said is ever lost. The point is a runaway or
+# hostile endpoint: whatever the server returns is typed as real keystrokes, and a reply of
+# a megabyte would hammer them into the focused window for minutes. Normal dictation is
+# nowhere near this. 0 removes the limit.
+max_chars = 20000
+
+[indicator]
+# Small always-on-top "recording / working" pill near the cursor (Windows).
+pill = true
+# Short tones on start, done, warning (see stt.no_speech_warn) and error. They play on the
+# default output device and follow it when it changes. The tray's "Audio cues" item flips
+# this for the running daemon without touching this file, so a restart comes back to the
+# value here.
+cue = true
+# How loud the cues are: 0.0 to 1.0, a fraction of full scale, applied on top of the system
+# volume and byovox's own slider in the Windows Volume Mixer. 0.0 plays silence; to turn the
+# cues off, set cue = false.
+cue_volume = 0.05
+
+[capture_log]
+# Keep every dictation as a WAV plus a JSONL row (raw text, polished text, keyboard layout,
+# the language of the request whose reply was kept (`auto` or a code), the detected
+# language and its probability, the strongest segment `no_speech_prob`, polish model,
+# per-stage latency, the injection rung used, and how many characters the sanitiser
+# removed from the endpoint's reply) — training data for your own correction rules. A reply
+# that sanitised away to nothing is recorded too, since that is the one worth looking at.
+# Off by default.
+enabled = false
+# Directory; empty = byovox's data directory + `capture`: %APPDATA%\byovox\data\capture
+# (Windows), ~/.local/share/byovox/capture (Linux),
+# ~/Library/Application Support/byovox/capture (macOS).
+dir = ""
+# Delete captures older than this many days. What accumulates here is recordings of your
+# voice and verbatim transcripts — including anything you dictated by mistake — so it does
+# not grow for ever by default. Pruning runs at startup and after each dictation, and only
+# ever touches files byovox itself named (`<timestamp>-<n>.wav`) plus the rows in
+# dictations.jsonl; anything else you keep in this directory is left alone.
+# 0 keeps everything: the right setting if you are deliberately building a corpus to tune
+# no_speech_threshold or your own correction rules.
+keep_days = 30
+
+[logging]
+# trace | debug | info | warn | error. Transcript text appears only at debug and trace.
+level = "info"
+
+[capture]
+# Which microphone to record from. Empty = whatever the system has as its default recording
+# device.
+# Worth setting when a Bluetooth headset is in the picture: connecting one makes it the
+# default input device, and opening a capture stream on it forces the headset out of A2DP
+# (stereo) into the hands-free profile (mono, 8-16 kHz) for as long as the stream is open —
+# an audible jump in pitch and volume at every press and again at every release, and a worse
+# transcript than the built-in array would have given. The done cue byovox plays is output
+# only and does not do this.
+# Matched as a case-insensitive substring of the device's name as the audio host reports it,
+# which is shorter than the Sound control panel's spelling ("Microphone Array" rather than
+# "Microphone Array (Example Audio)"): run `byovox check`, which prints
+# the device it used and lists every input name on its `inputs` row, and copy a word out of
+# the one you want. A name given in full picks that device even when another name contains it
+# ("Microphone" beside "Microphone Array"); otherwise, if several match, the first the system
+# enumerates wins. A value that matches nothing is a startup error naming this key and
+# listing those names — never a silent fallback to the default.
+device = ""
+
+[update]
+# One anonymous version request per day: when the daemon starts, and at most once in 24
+# hours, byovox asks api.github.com for its latest release. The request carries a
+# `byovox/<version>` User-Agent and nothing else about you or this file. A newer release
+# shows in the tray's status line with a menu item that opens its release page, and on
+# Windows as one balloon the first time that release is seen; nothing is downloaded or
+# installed. A failed request is one line in the log; the next attempt is at the first
+# daemon start a day or more later.
+# false = no request is ever made.
+check = true

@@ -1,0 +1,46 @@
+# Binding for ouro (https://github.com/iteramen/ouro), the issue-to-PR workflow this repo is
+# developed with.
+schema = 1
+
+[repo]
+slug = "iteramen/byovox"
+default_branch = "main"
+protected_branch_prefixes = []
+
+[labels]
+scope = []
+area = []
+
+# The same three checks ci.yml runs.
+[[gate]]
+areas = ["*"]
+run = "cargo fmt --check"
+
+[[gate]]
+areas = ["*"]
+run = "cargo clippy --all-targets --locked -- -D warnings"
+
+[[gate]]
+areas = ["*"]
+run = "cargo test --locked"
+
+[ship]
+policy = "stop-at-pr"
+review = "adversarial-review"
+test_first_for_bugs = true
+
+[rolling_issues]
+drift_audit = "Docs drift audit"
+loop_runs = "Loop runs"
+
+[authority]
+local = ["SECURITY.md"]
+
+[overlays]
+implement = ["SECURITY.md"]
+land = []
+drift = []
+
+[owner]
+role = "loop owner"
+ruling_approvers = ["BoJl4apa"]

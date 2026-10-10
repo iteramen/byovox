@@ -1,0 +1,6 @@
+.worktrees/
+.superpowers/
+/target
+__pycache__/
+.claude/worktrees/
+.claude/ouro.local.toml

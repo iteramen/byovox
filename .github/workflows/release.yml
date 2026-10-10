@@ -1,0 +1,141 @@
+name: release
+
+# A tag becomes a Windows zip, its SHA256SUMS, and a build-provenance attestation over the zip
+# and both binaries. Windows only until another platform's backends are implemented.
+on:
+  push:
+    tags: ["v*"]
+  # Releases an already-pushed tag after a failed run. A tag that already has a published
+  # release stops at the `released` check; replacing one means `gh release delete <tag>` first.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v0.1.0"
+        required: true
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      # The tag reaches scripts only through env, never spliced into script text, and is
+      # validated before anything reads it: a crafted dispatch input would otherwise run as code
+      # or inject keys into $GITHUB_OUTPUT.
+      - id: tag
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::not a release tag: $(printf %s "$TAG" | tr -d '\r\n' | head -c 80)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          case "$TAG" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # Only a published release stops the run: a draft is what a run that died mid-upload
+      # leaves, and a failed `gh` call proves nothing about absence.
+      - id: released
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]; then
+            echo "::notice::$TAG is already released; delete it first to replace it"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Actions are pinned to commits: this job can publish assets and mint attestations.
+      # `refs/tags/` so a branch sharing the tag's name can never be built instead.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.released.outputs.exists != 'true'
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        if: steps.released.outputs.exists != 'true'
+
+      - name: Tag must name the version the binary prints
+        if: steps.released.outputs.exists != 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          base="${TAG#v}"; base="${base%%-*}"
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          if [ "$base" != "$version" ]; then
+            echo "::error::tag $TAG claims version $base, Cargo.toml says $version" >&2
+            exit 1
+          fi
+          echo "$TAG builds $version"
+
+      # `ci` runs independently and cannot block this workflow, so the release tests itself.
+      - if: steps.released.outputs.exists != 'true'
+        run: cargo test --locked
+
+      - if: steps.released.outputs.exists != 'true'
+        run: cargo build --release --locked
+
+      # Flat layout: cargo-binstall expects the binaries at the top level.
+      - name: Assemble the archive and its checksum
+        if: steps.released.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          $stage = "dist/stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Destination $stage -Path @(
+            "target/release/byovox.exe",
+            "target/release/byovox-daemon.exe",
+            "LICENSE",
+            "README.md",
+            "SECURITY.md"
+          )
+          New-Item -ItemType Directory -Force -Path "$stage/docs" | Out-Null
+          Copy-Item -Destination "$stage/docs" -Path "docs/config.example.toml"
+          $zip = "byovox-$env:TAG-x86_64-pc-windows-msvc.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/$zip"
+          # LF and two spaces, so `sha256sum -c SHA256SUMS` reads it.
+          $sum = (Get-FileHash "dist/$zip" -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText((Join-Path $PWD "dist/SHA256SUMS"), "$sum  $zip`n")
+          Get-Content "dist/SHA256SUMS"
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: steps.released.outputs.exists != 'true'
+        with:
+          subject-path: |
+            dist/byovox-${{ steps.tag.outputs.tag }}-x86_64-pc-windows-msvc.zip
+            target/release/byovox.exe
+            target/release/byovox-daemon.exe
+
+      - name: Publish the release
+        if: steps.released.outputs.exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PRERELEASE: ${{ steps.tag.outputs.prerelease }}
+        run: |
+          args=(--generate-notes --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" "${args[@]}" \
+            "dist/byovox-$TAG-x86_64-pc-windows-msvc.zip" \
+            dist/SHA256SUMS

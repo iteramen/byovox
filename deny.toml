@@ -1,0 +1,42 @@
+# cargo-deny: dependency advisories and licence policy. CI runs
+# `cargo deny check --warn unmaintained`.
+
+[advisories]
+# Every unmaintained advisory in this tree is transitive with no upgrade path, so CI demotes
+# them to warnings; they stay visible so a new one is noticed.
+unmaintained = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Permissive only, and only what the tree resolves to: each entry is required by some crate.
+# MPL-2.0 is file-level copyleft; shipping those crates unmodified carries no obligation.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "BSL-1.0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+# byovox's own licence, for byovox alone: a dependency carrying it must still fail.
+[[licenses.exceptions]]
+crate = "byovox"
+allow = ["PolyForm-Noncommercial-1.0.0"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
