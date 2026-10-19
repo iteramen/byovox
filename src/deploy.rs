@@ -299,7 +299,8 @@ pub fn extract(zip: &Path, dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| failed(&e))?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| failed(&e))?;
-        let Some(name) = unpacked_name(entry.name()).map(str::to_owned) else {
+        let name = entry.name().map_err(|e| failed(&e))?;
+        let Some(name) = unpacked_name(&name).map(str::to_owned) else {
             continue;
         };
         let to = if name == SERVER_EXE {
@@ -806,7 +807,9 @@ Content-Length: 20
         }
         let archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
         assert!(
-            archive.file_names().any(|n| n == "Release/../evil.dll"),
+            archive
+                .file_names()
+                .any(|n| n.is_ok_and(|n| n == "Release/../evil.dll")),
             "the climbing entry is in the zip as written"
         );
         drop(archive);

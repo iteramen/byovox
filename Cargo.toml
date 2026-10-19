@@ -49,7 +49,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 tray-icon = "0.24.2"
 ureq = "3.4.0"
 winit = "0.30.13"
-zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
