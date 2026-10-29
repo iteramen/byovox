@@ -13,15 +13,12 @@ area = []
 
 # The same three checks ci.yml runs.
 [[gate]]
-areas = ["*"]
 run = "cargo fmt --check"
 
 [[gate]]
-areas = ["*"]
 run = "cargo clippy --all-targets --locked -- -D warnings"
 
 [[gate]]
-areas = ["*"]
 run = "cargo test --locked"
 
 [ship]
