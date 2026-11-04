@@ -1354,14 +1354,14 @@ mod tests {
         let mut r = rig(FakeTranscriber::ok("hi"), None, false, false);
         r.p.shared().lock().unwrap().device = Some("Microphone (Example USB)".into());
         dictate(&mut r, Duration::from_secs(1));
-        assert_eq!(
-            r.cap.device.lock().unwrap().as_deref(),
-            Some("Microphone (Example USB)")
-        );
         assert_eq!(r.p.shared().lock().unwrap().device, None, "taken once");
         *r.cap.device.lock().unwrap() = None;
         dictate(&mut r, Duration::from_secs(1));
-        assert_eq!(*r.cap.device.lock().unwrap(), None, "not set again");
+        assert_eq!(
+            *r.cap.opened_on.lock().unwrap(),
+            [Some("Microphone (Example USB)".to_string()), None],
+            "the first start opens on the pick; the second is not set again"
+        );
     }
 
     #[test]

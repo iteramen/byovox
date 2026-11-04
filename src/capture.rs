@@ -477,6 +477,17 @@ mod tests {
     }
 
     #[test]
+    fn an_exact_full_name_wins_over_one_that_contains_it() {
+        // Windows numbers a second endpoint with the same name.
+        let d = vec![
+            named("2- Microphone (Example USB)", "Microphone"),
+            named("Microphone (Example USB)", "Microphone"),
+        ];
+        assert_eq!(select("microphone (example usb)", &d), Ok(1));
+        assert_eq!(select("2- Microphone (Example USB)", &d), Ok(0));
+    }
+
+    #[test]
     fn a_selector_that_matches_nothing_names_the_key_the_value_and_the_alternatives() {
         let e = select("nonexistent", &devices()).unwrap_err();
         assert_eq!(e, "capture.device \"nonexistent\" matched no input device");

@@ -168,7 +168,7 @@ Any case-insensitive substring of the device's Sound control panel name will do.
 (`Microphone Array (Example Audio)`) or the short name before the parentheses wins over one that
 merely contains it: `Microphone` picks a device called exactly that, not `Microphone Array`.
 Two devices can share a short name (`Microphone (USB Mic)` and a virtual
-`Microphone (Screen Cast Audio)`) — then only the full name picks the right one. `byovox check`
+`Microphone (Screen Cast Audio)`) — then the full name picks the right one, or a part of it the other lacks. `byovox check`
 prints the names to choose from on its `inputs` row. A name that matches no device is refused
 at startup with that same list, and `check` warns when the microphone it used is a hands-free
 endpoint. A re-run of setup keeps `capture.device` too.
