@@ -791,6 +791,17 @@ fn write_device(path: &Path, device: &str) -> Result<()> {
     };
     let toml = crate::setup::toml_string(device);
     let out = crate::setup::set_or_add_key(&text, "capture", "device", &toml);
+    // `set_key` edits only a `device = ` line at column zero; another spelling would gain a second key.
+    let reread = out.parse::<toml::Table>().ok();
+    let written = reread
+        .as_ref()
+        .and_then(|t| t.get("capture")?.get("device")?.as_str());
+    if written != Some(device) {
+        anyhow::bail!(
+            "could not set capture.device in {} in place: edit it there",
+            path.display()
+        );
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
@@ -1145,6 +1156,20 @@ mod tests {
         let fresh = dir.join("none").join("config.toml");
         write_device(&fresh, "Headset").unwrap();
         assert_eq!(device(&fresh), "Headset");
+
+        let odd = dir.join("odd.toml");
+        let hand = "[capture]\n  device=\"Microphone\"\n";
+        std::fs::write(&odd, hand).unwrap();
+        let e = write_device(&odd, "Headset").unwrap_err();
+        assert!(
+            e.to_string().contains("could not set capture.device"),
+            "{e}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&odd).unwrap(),
+            hand,
+            "left as it was"
+        );
     }
 
     #[test]
