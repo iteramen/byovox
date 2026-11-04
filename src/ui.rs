@@ -238,7 +238,7 @@ fn status_label(
     let label = match (enabled, state, last_error) {
         (false, _, _) => "byovox: disabled".to_string(),
         (true, IndicatorState::Error, Some(e)) => {
-            format!("byovox: error — {}", e.chars().take(60).collect::<String>())
+            format!("byovox: error — {}", e.chars().take(80).collect::<String>())
         }
         (true, s, _) => format!("byovox: {}", state_word(s)),
     };
@@ -1256,6 +1256,13 @@ mod tests {
             status_label(true, IndicatorState::Error, error(), None),
             "byovox: error — stt transport: refused"
         );
+    }
+
+    #[test]
+    fn the_status_line_shows_a_whole_stt_timeout() {
+        let timed_out = crate::stt::timed_out(std::time::Duration::from_secs(3600));
+        let label = status_label(true, IndicatorState::Error, Some(timed_out.clone()), None);
+        assert_eq!(label, format!("byovox: error — {timed_out}"));
     }
 
     #[test]

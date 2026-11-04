@@ -51,7 +51,8 @@ api_key_file = ""
 # terms only: people's names stay in the language being spoken, and an ordinary word that
 # sounds like a listed name is left alone.
 prompt = ""
-# Whole-request timeout in seconds.
+# Whole-request timeout in seconds. A request that runs past it fails with an error naming
+# `stt.timeout_s`; a long clip on a slow server may need a higher value.
 timeout_s = 30
 # Seconds to wait for the connection itself, counted inside `timeout_s`. Raise it when a
 # slow VPN or a roaming link is slow to open a connection.

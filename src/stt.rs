@@ -193,10 +193,15 @@ enum Attempt {
 }
 
 /// The head of a timed-out request's error; `is_timeout` is its one reader.
-const TIMED_OUT: &str = "stt timeout: no reply within";
+const TIMED_OUT: &str = "stt ran past stt.timeout_s";
 
-fn timed_out(timeout: Duration) -> String {
-    format!("{TIMED_OUT} {} s", timeout.as_secs())
+/// No colon anywhere: `pipeline::summary` keeps only the text before one, and the tray and
+/// `byovox status` should still show the seconds and the hint.
+pub(crate) fn timed_out(timeout: Duration) -> String {
+    format!(
+        "{TIMED_OUT} ({} s); a long clip on a slow server may need more",
+        timeout.as_secs()
+    )
 }
 
 pub fn is_timeout(error: &str) -> bool {
@@ -731,8 +736,11 @@ mod tests {
             true,
         );
         let err = c.transcribe(b"RIFF", &undetermined(), None).unwrap_err();
-        assert!(err.starts_with("stt timeout: no reply within 1 s"), "{err}");
         assert!(is_timeout(&err), "{err}");
+        assert_eq!(
+            crate::pipeline::summary(&err),
+            "stt ran past stt.timeout_s (1 s); a long clip on a slow server may need more"
+        );
         std::thread::sleep(Duration::from_millis(500));
         assert_eq!(
             srv.requests().len(),

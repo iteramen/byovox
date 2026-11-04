@@ -2964,7 +2964,7 @@ mod tests {
 
     #[test]
     fn only_a_timed_out_probe_gets_the_too_slow_note() {
-        let timed_out = Err("stt timeout: no reply within 45 s".to_string());
+        let timed_out = Err(stt::timed_out(Duration::from_secs(45)));
         assert_eq!(too_slow_note(&timed_out, 45), Some(too_slow(45)));
         for probed in [
             Ok(()),
