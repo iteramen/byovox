@@ -25,6 +25,9 @@ run = "cargo test --locked"
 policy = "stop-at-pr"
 review = "adversarial-review"
 test_first_for_bugs = true
+# Both ci.yml test jobs run every [[gate]] above.
+validation = "ci"
+validation_checks = ["test (windows-latest)", "test (ubuntu-latest)"]
 
 [rolling_issues]
 loop_runs = "Loop runs"
