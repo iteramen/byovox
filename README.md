@@ -89,7 +89,7 @@ repository's release workflow and names the commit it was built from, the one `b
 prints. Windows warns on first run (More info → Run anyway), because the binaries aren't
 code-signed.
 
-Or build it with Rust 1.88+:
+Or build it with Rust 1.92+:
 
 ```sh
 cargo install --git https://github.com/iteramen/byovox --locked

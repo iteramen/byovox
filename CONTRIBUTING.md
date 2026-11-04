@@ -6,7 +6,7 @@ through [SECURITY.md](SECURITY.md), not an issue.
 
 ## Build
 
-Rust 1.88 or later. The gate every change passes, and what CI runs on Windows and Ubuntu:
+Rust 1.92 or later. The gate every change passes, and what CI runs on Windows and Ubuntu:
 
 ```sh
 cargo fmt --check
@@ -15,7 +15,7 @@ cargo test --locked
 python bench/polish_bench.py --self-test
 ```
 
-CI also checks the minimum Rust version (`cargo check` on 1.88) and runs `cargo audit` and
+CI also checks the minimum Rust version (`cargo check` on 1.92) and runs `cargo audit` and
 `cargo deny check --warn unmaintained`. Tests that need a desktop are `#[ignore]`d:
 `cargo test -- --ignored` on Windows. A change to the cleanup prompt is benched against main
 with `bench/polish_bench.py` before it lands. How the code fits together: [docs/design.md](docs/design.md).
