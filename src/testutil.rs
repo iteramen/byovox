@@ -152,6 +152,7 @@ pub mod fakes {
         pub stop_fails: bool,
         pub starts: Arc<Mutex<usize>>,
         pub stops: Arc<Mutex<usize>>,
+        pub device: Arc<Mutex<Option<String>>>,
     }
     impl FakeCapture {
         pub fn new(samples: usize) -> Self {
@@ -162,6 +163,7 @@ pub mod fakes {
                 stop_fails: false,
                 starts: Default::default(),
                 stops: Default::default(),
+                device: Default::default(),
             }
         }
 
@@ -174,6 +176,9 @@ pub mod fakes {
         }
     }
     impl Capture for FakeCapture {
+        fn set_device(&mut self, selector: &str) {
+            *self.device.lock().unwrap() = Some(selector.to_string());
+        }
         fn start(&mut self) -> Result<(), String> {
             *self.starts.lock().unwrap() += 1;
             if self.start_fails {

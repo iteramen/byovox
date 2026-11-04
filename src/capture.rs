@@ -12,6 +12,8 @@ use crate::audio::Audio;
 pub trait Capture: Send {
     fn start(&mut self) -> Result<(), String>;
     fn stop(&mut self) -> Result<Audio, String>;
+    /// The `capture.device` selector the next `start()` opens; `""` is the system default.
+    fn set_device(&mut self, _selector: &str) {}
 }
 
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -66,7 +68,7 @@ fn input_device(selector: &str) -> Result<(cpal::Device, cpal::SupportedStreamCo
         .default_input_config()
         .map_err(|e| format!("input config: {e}"))?;
     validate(cfg.sample_rate(), cfg.channels(), cfg.sample_format())
-        .map_err(|e| format!("{}: {e}", device_name(&device)))?;
+        .map_err(|e| format!("{}: {e}", device_name(&device).full))?;
     Ok((device, cfg))
 }
 
@@ -77,26 +79,38 @@ fn input_devices() -> Result<Vec<cpal::Device>, String> {
         .map_err(|e| format!("listing input devices: {e}"))
 }
 
-fn names(devices: &[cpal::Device]) -> Vec<String> {
+fn names(devices: &[cpal::Device]) -> Vec<DeviceName> {
     devices.iter().map(device_name).collect()
 }
 
-pub fn input_names() -> Result<Vec<String>, String> {
+pub fn input_names() -> Result<Vec<DeviceName>, String> {
     Ok(names(&input_devices()?))
 }
 
-fn select(selector: &str, names: &[String]) -> Result<usize, String> {
+/// The Sound control panel's name ("Microphone (Example Audio)") and the audio host's short
+/// one ("Microphone"), which two devices can share.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceName {
+    pub full: String,
+    pub short: String,
+}
+
+pub fn select(selector: &str, names: &[DeviceName]) -> Result<usize, String> {
     let wanted = selector.trim().to_lowercase();
     // Every substring contains the empty one, so an empty selector would silently pick the first
     // device; the default is never chosen from a list.
     if wanted.is_empty() {
         return Err("capture.device is empty: that is the system default, not a name".into());
     }
-    let names: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+    let names: Vec<(String, String)> = names
+        .iter()
+        .map(|n| (n.full.to_lowercase(), n.short.to_lowercase()))
+        .collect();
     names
         .iter()
-        .position(|n| *n == wanted)
-        .or_else(|| names.iter().position(|n| n.contains(&wanted)))
+        .position(|(full, _)| *full == wanted)
+        .or_else(|| names.iter().position(|(_, short)| *short == wanted))
+        .or_else(|| names.iter().position(|(full, _)| full.contains(&wanted)))
         .ok_or_else(|| {
             format!(
                 "capture.device {:?} matched no input device",
@@ -105,12 +119,13 @@ fn select(selector: &str, names: &[String]) -> Result<usize, String> {
         })
 }
 
-fn resolve(selector: &str, names: &[String]) -> Result<usize, String> {
+fn resolve(selector: &str, names: &[DeviceName]) -> Result<usize, String> {
     select(selector, names).map_err(|e| {
         if names.is_empty() {
             format!("{e}; no input devices found")
         } else {
-            format!("{e}; available: {}", names.join(" | "))
+            let full: Vec<&str> = names.iter().map(|n| n.full.as_str()).collect();
+            format!("{e}; available: {}", full.join(" | "))
         }
     })
 }
@@ -122,11 +137,21 @@ pub fn validate_selector(selector: &str) -> Result<(), String> {
     resolve(selector, &input_names()?).map(|_| ())
 }
 
-fn device_name(device: &cpal::Device) -> String {
-    device
-        .description()
-        .map(|d| d.name().to_string())
-        .unwrap_or_else(|_| "unnamed".into())
+fn device_name(device: &cpal::Device) -> DeviceName {
+    let Ok(d) = device.description() else {
+        return DeviceName {
+            full: "unnamed".into(),
+            short: "unnamed".into(),
+        };
+    };
+    let short = d.name().to_string();
+    // WASAPI puts the endpoint's friendly name first in `extended` when it differs from `name`.
+    let full = d
+        .extended()
+        .first()
+        .cloned()
+        .unwrap_or_else(|| short.clone());
+    DeviceName { full, short }
 }
 
 /// `Audio::from_f32` reads a zero rate as "already at target, leave it alone" and clamps a
@@ -174,7 +199,7 @@ impl std::fmt::Display for DeviceInfo {
 pub fn describe_device(selector: &str) -> Result<DeviceInfo, String> {
     let (device, cfg) = input_device(selector)?;
     Ok(DeviceInfo {
-        name: device_name(&device),
+        name: device_name(&device).full,
         rate: cfg.sample_rate(),
         channels: cfg.channels(),
         format: cfg.sample_format(),
@@ -182,6 +207,10 @@ pub fn describe_device(selector: &str) -> Result<DeviceInfo, String> {
 }
 
 impl Capture for CpalCapture {
+    fn set_device(&mut self, selector: &str) {
+        self.device = selector.to_string();
+    }
+
     fn start(&mut self) -> Result<(), String> {
         if self.worker.is_some() {
             return Err("already recording".into());
@@ -324,18 +353,23 @@ fn build_stream(
 #[cfg(test)]
 mod tests {
     use super::{
-        Capture, CpalCapture, DeviceInfo, TryRecvError, resolve, select, should_play, validate,
-        validate_layout,
+        Capture, CpalCapture, DeviceInfo, DeviceName, TryRecvError, resolve, select, should_play,
+        validate, validate_layout,
     };
     use cpal::SampleFormat;
 
-    fn devices() -> Vec<String> {
-        [
-            "Microphone Array (Example Audio)",
-            "Headset (Example Buds Hands-Free)",
+    fn named(full: &str, short: &str) -> DeviceName {
+        DeviceName {
+            full: full.into(),
+            short: short.into(),
+        }
+    }
+
+    fn devices() -> Vec<DeviceName> {
+        vec![
+            named("Microphone Array (Example Audio)", "Microphone Array"),
+            named("Headset (Example Buds Hands-Free)", "Headset"),
         ]
-        .map(String::from)
-        .to_vec()
     }
 
     #[test]
@@ -413,7 +447,10 @@ mod tests {
 
     #[test]
     fn an_exact_name_wins_and_otherwise_the_first_match() {
-        let d = vec!["Microphone Array".to_string(), "Microphone".to_string()];
+        let d = vec![
+            named("Microphone Array (Example Audio)", "Microphone Array"),
+            named("Microphone (Example USB)", "Microphone"),
+        ];
         assert_eq!(select("Microphone", &d), Ok(1), "the exact name");
         assert_eq!(
             select(" microphone ", &d),
@@ -422,6 +459,21 @@ mod tests {
         );
         assert_eq!(select("Micro", &d), Ok(0), "a part: the first match");
         assert_eq!(select("Microphone Array", &d), Ok(0));
+    }
+
+    #[test]
+    fn a_full_name_tells_apart_devices_that_share_a_short_one() {
+        let d = vec![
+            named("Microphone (Example Virtual)", "Microphone"),
+            named("Microphone (Example USB)", "Microphone"),
+        ];
+        assert_eq!(select("Microphone (Example USB)", &d), Ok(1));
+        assert_eq!(select("example usb", &d), Ok(1), "a part of the full name");
+        assert_eq!(
+            select("Microphone", &d),
+            Ok(0),
+            "a shared short name: the first"
+        );
     }
 
     #[test]

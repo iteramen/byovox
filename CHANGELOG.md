@@ -9,6 +9,15 @@ went public; their notes are kept below.
 
 ## Unreleased
 
+Added
+- A Microphone menu in the tray lists the inputs present each time it opens and writes the
+  one you pick to `capture.device`.
+
+Changed
+- Microphones are named as in the Sound control panel (`Microphone (USB Mic)`, not
+  `Microphone`) in `check` and in errors, and `capture.device` matches those names, so two
+  devices that share a short name can be told apart. A short name still picks as before.
+
 ## 0.5.0 — 2026-10-10
 
 Changed

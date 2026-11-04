@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -24,6 +24,9 @@ fn shared_of(lock: &Mutex<Shared>) -> std::sync::MutexGuard<'_, Shared> {
 }
 
 const ERROR_HOLD: Duration = Duration::from_secs(3);
+
+/// Microphone items carry their `capture.device` value after this prefix; "" is the system default.
+const MIC_ID: &str = "mic:";
 
 /// Windows fires a burst of notifications when a Bluetooth headset disconnects; the default settles only after it.
 const CUE_REOPEN_SETTLE: Duration = Duration::from_millis(500);
@@ -105,6 +108,9 @@ pub enum UserEvent {
     /// The cue sink may be bound to a removed endpoint. Posted from a WASAPI thread, so it carries nothing.
     AudioDeviceChanged,
     UpdateAvailable(crate::update::Release),
+    /// The pointer reached the tray icon, so the menu may open next: the microphone list is rebuilt.
+    TrayHovered,
+    PickMic(String),
     Quit,
 }
 
@@ -114,6 +120,8 @@ pub struct UiOptions {
     pub cue: bool,
     pub cue_volume: f32,
     pub version: &'static str,
+    /// Only the starting `capture.device`; `App.device` is authoritative afterwards.
+    pub device: String,
 }
 
 #[derive(Clone)]
@@ -260,6 +268,7 @@ struct App {
     enabled: bool,
     mode: HotkeyMode,
     cues_on: bool,
+    device: String,
     shown: IndicatorState,
     update: Announcement,
 }
@@ -297,6 +306,8 @@ struct MenuItems {
     /// Checked = toggle, cleared = hold.
     mode: CheckMenuItem,
     cues: CheckMenuItem,
+    mic: Submenu,
+    mics: Vec<CheckMenuItem>,
     #[cfg(windows)]
     autostart: CheckMenuItem,
     copy_last: MenuItem,
@@ -316,6 +327,8 @@ impl App {
             enabled: MenuItem::new(if self.enabled { "Disable" } else { "Enable" }, true, None),
             mode: CheckMenuItem::new("Toggle mode", true, self.mode == HotkeyMode::Toggle, None),
             cues: CheckMenuItem::new("Audio cues", true, self.cues_on, None),
+            mic: Submenu::new("Microphone", true),
+            mics: Vec::new(),
             #[cfg(windows)]
             autostart: CheckMenuItem::new("Run on startup", true, autostart_on(), None),
             copy_last: MenuItem::new("Copy last transcript", true, None),
@@ -332,6 +345,7 @@ impl App {
             &items.enabled,
             &items.mode,
             &items.cues,
+            &items.mic,
             #[cfg(windows)]
             &items.autostart,
             &items.copy_last,
@@ -363,16 +377,77 @@ impl App {
         ];
         // Runs in the tray's window procedure: a panic would unwind through foreign frames, so a poisoned lock drops the click.
         MenuEvent::set_event_handler(Some(move |ev: MenuEvent| {
-            if let Some((_, action)) = ids.iter().find(|(id, _)| *id == ev.id)
-                && let Ok(p) = proxy.lock()
-            {
+            let Ok(p) = proxy.lock() else { return };
+            if let Some((_, action)) = ids.iter().find(|(id, _)| *id == ev.id) {
                 let _ = p.send_event(UserEvent::Menu(*action));
+            } else if let Some(device) = ev.id.0.strip_prefix(MIC_ID) {
+                let _ = p.send_event(UserEvent::PickMic(device.to_string()));
+            }
+        }));
+        // Enter comes well before the click that opens the menu; Down covers a click without one.
+        let proxy = Mutex::new(self.proxy.clone());
+        TrayIconEvent::set_event_handler(Some(move |ev: TrayIconEvent| {
+            let opening = matches!(
+                ev,
+                TrayIconEvent::Enter { .. }
+                    | TrayIconEvent::Click {
+                        button_state: MouseButtonState::Down,
+                        ..
+                    }
+            );
+            if opening && let Ok(p) = proxy.lock() {
+                let _ = p.send_event(UserEvent::TrayHovered);
             }
         }));
         self.tray = Some(tray);
         self.items = Some(items);
+        self.refresh_mics();
         self.announce();
         Ok(())
+    }
+
+    /// Lists the inputs present now and checks the one `capture.device` resolves to.
+    fn refresh_mics(&mut self) {
+        let Some(items) = &mut self.items else {
+            return;
+        };
+        let names = crate::capture::input_names().unwrap_or_else(|e| {
+            tracing::warn!("listing microphones for the tray: {e}");
+            Vec::new()
+        });
+        for old in items.mics.drain(..) {
+            let _ = items.mic.remove(&old);
+        }
+        let chosen = if self.device.trim().is_empty() {
+            Some(0)
+        } else {
+            crate::capture::select(&self.device, &names)
+                .ok()
+                .map(|i| i + 1)
+        };
+        let entries = std::iter::once(("", "System default"))
+            .chain(names.iter().map(|n| (n.full.as_str(), n.full.as_str())));
+        for (i, (value, label)) in entries.enumerate() {
+            let id = format!("{MIC_ID}{value}");
+            let item = CheckMenuItem::with_id(id, label, true, chosen == Some(i), None);
+            if let Err(e) = items.mic.append(&item) {
+                tracing::warn!("tray microphone item: {e}");
+            }
+            items.mics.push(item);
+        }
+    }
+
+    fn pick_mic(&mut self, device: String) {
+        match write_device(&self.config_path, &device) {
+            Ok(()) => {
+                tracing::info!(device = %device, "microphone picked from the tray");
+                self.device = device.clone();
+                shared_of(&self.shared).device = Some(device);
+            }
+            Err(e) => tracing::warn!("microphone from the tray: {e:#}"),
+        }
+        // muda flipped the clicked item; redraw the marks from what was saved.
+        self.refresh_mics();
     }
 
     /// `sound` is false for the timed Error to Idle fall back, which must not add a second tone.
@@ -614,6 +689,8 @@ impl ApplicationHandler<UserEvent> for App {
                 self.update.arrived(release);
                 self.announce();
             }
+            UserEvent::TrayHovered => self.refresh_mics(),
+            UserEvent::PickMic(device) => self.pick_mic(device),
             UserEvent::Quit => event_loop.exit(),
         }
     }
@@ -677,6 +754,7 @@ pub fn run(
         (s.enabled, s.mode)
     };
     let cues_on = opts.cue;
+    let device = opts.device.clone();
     let mut app = App {
         opts,
         shared,
@@ -696,11 +774,27 @@ pub fn run(
         enabled,
         mode,
         cues_on,
+        device,
         shown: IndicatorState::Idle,
         update: Announcement::default(),
     };
     event_loop.run_app(&mut app).context("event loop")?;
     Ok(())
+}
+
+/// Edits only `capture.device`, in the file as it is now: hand edits made since startup survive.
+fn write_device(path: &Path, device: &str) -> Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let toml = crate::setup::toml_string(device);
+    let out = crate::setup::set_or_add_key(&text, "capture", "device", &toml);
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
 }
 
 // Windows' own Segoe UI, so no font ships with byovox.
@@ -1018,6 +1112,40 @@ fn open_path(p: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tray_pick_rewrites_only_capture_device_and_keeps_the_rest() {
+        let dir = std::env::temp_dir().join(format!("byovox-test-{}-mic", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[stt]\nbase_url = \"http://s/v1\"\n[capture]\n# pinned by hand\ndevice = \"Microphone\"\n",
+        )
+        .unwrap();
+        write_device(&path, r#"Microphone (Example "USB")"#).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("base_url = \"http://s/v1\""), "{text}");
+        assert!(text.contains("# pinned by hand"), "{text}");
+        assert!(
+            text.contains(r#"device = "Microphone (Example \"USB\")""#),
+            "{text}"
+        );
+        assert_eq!(text.matches("device =").count(), 1, "{text}");
+        // Parsed, not `config::load`ed: this fixture has no endpoints to validate.
+        let device = |p: &Path| {
+            let t: toml::Table = std::fs::read_to_string(p).unwrap().parse().unwrap();
+            t["capture"]["device"].as_str().unwrap().to_string()
+        };
+        assert_eq!(device(&path), r#"Microphone (Example "USB")"#);
+
+        write_device(&path, "").unwrap();
+        assert_eq!(device(&path), "");
+
+        let fresh = dir.join("none").join("config.toml");
+        write_device(&fresh, "Headset").unwrap();
+        assert_eq!(device(&fresh), "Headset");
+    }
 
     #[test]
     fn copy_last_returns_while_the_clipboard_write_is_still_blocked() {
