@@ -17,6 +17,9 @@ Changed
 - Microphones are named as in the Sound control panel (`Microphone (USB Mic)`, not
   `Microphone`) in `check` and in errors, and `capture.device` matches those names, so two
   devices that share a short name can be told apart. A short name still picks as before.
+- Building from source needs Rust 1.92 (was 1.88). The tray crates move to tray-icon 0.26
+  and muda 0.21; on Linux the tray is a DBus status icon without GTK, which drops the
+  unsound glib 0.18 (GHSA-wrw7-89jp-8q8g).
 
 ## 0.5.0 — 2026-10-10
 
