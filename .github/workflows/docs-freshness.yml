@@ -1,0 +1,52 @@
+name: Docs Freshness
+
+# ouro template — copy to .github/workflows/ and fill the <placeholders>.
+#
+# The deterministic docs-rot gate (`docs/docs-governance.md` in the ouro plugin), on every pull
+# request and every push to the default branch. Gate mode exits 1 on a blocking finding.
+#
+# No paths filter, deliberately. Filtering couples this file to the gate's own extension list —
+# an extension the script scans but the filter omits is an extension whose renames never trigger
+# the gate, and the break lands green. A checkout and one gate run on every pull request costs
+# less than policing that coupling.
+#
+# No signal overrides either, so a consumer gets the gate's shipped report-only default: S9, S3
+# and S10 report, everything else blocks — S1, S2 and S7 out of the box, plus S4a, S4b and S8 once
+# the binding arms them. Narrow that in the repo's own `[docs].report_only`, not in this file.
+#
+# The job runs on GitHub's `ubuntu-latest` unless the repository variable `OURO_RUNS_ON` names
+# other runners. That variable holds JSON: a label string or an array of labels. The choice lives
+# in the repository's settings, so a re-copy of this template keeps it.
+#
+# A pull request from another repository always runs on `ubuntu-latest`, never on OURO_RUNS_ON's
+# runner: that routes an honest fork away from a self-hosted machine and is no security boundary
+# -- a pull_request run uses the fork's own copy of this file.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (vars.OURO_RUNS_ON && fromJSON(vars.OURO_RUNS_ON)) || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # The gate ships as a composite Action in the ouro plugin and scans the repo checked out
+      # above, from the job workspace, so that checkout takes no `path:`. Pin a released tag and bump it when taking a new ouro release — `uses:` cannot read
+      # a variable, so every pin a repo holds must name the same release: this line, the
+      # actions/gates line in its copy of the ci template, and OURO_REF if it runs the agent-ready shape-gate workflow.
+      #
+      # Reading the binding's [docs] table needs python3 3.12+: an older `python3` on PATH fails the
+      # gate with the floor message. The Action pins 3.12; a step copied out of it by hand must pin
+      # one too. On a runner that already carries 3.12+, or where a repo's policy forbids
+      # actions/setup-*, add `with: { setup-python: false }` below and the gate runs against the
+      # runner's own python3.
+      - name: Docs-freshness gate (deterministic)
+        uses: iteramen/ouro/actions/docs-freshness@v1.10.0

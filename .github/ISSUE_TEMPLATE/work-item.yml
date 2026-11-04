@@ -1,0 +1,21 @@
+name: Work item
+
+# ouro template — copy to .github/ISSUE_TEMPLATE/, the directory GitHub reads issue forms from.
+
+description: A single-deliverable work item (bug or enhancement) — one issue, one deliverable
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: One deliverable per issue. Cite files/lines where relevant; claims verified against the code make the issue agent-ready.
+    validations:
+      required: true
+  - type: input
+    id: doc-impact
+    attributes:
+      label: Doc impact on close
+      description: The doc(s) that get the forward-facing edit when this lands, in the same PR — or "none", said explicitly. (ouro contract, `docs/contract.md` in the ouro plugin)
+      placeholder: e.g. docs/<subsystem>/README.md — or none
+    validations:
+      required: true

@@ -1,0 +1,48 @@
+name: Issue Intake Label
+
+# ouro template — copy to .github/workflows/. The label list in the grep below is the
+# contract's eight states (docs/contract.md in the ouro plugin); it changes only when the
+# contract does.
+# Every open issue carries exactly one state label (ouro contract, docs/contract.md).
+# A newly filed issue has none until someone grades it, so "ungraded" reads as an
+# unlabeled gap rather than a queue. This stamps needs-triage at filing time.
+#
+# Deliberately not a script: two gh calls, no checkout, no build. The job runs on GitHub's
+# `ubuntu-latest` unless the repository variable `OURO_RUNS_ON` names other runners. That
+# variable holds JSON: a label string or an array of labels. The choice lives in the
+# repository's settings, so a re-copy of this template keeps it. The step runs under bash on any
+# runner: a Windows one needs Git Bash, which GitHub's own Windows images carry.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  stamp:
+    name: Stamp needs-triage
+    runs-on: ${{ vars.OURO_RUNS_ON && fromJSON(vars.OURO_RUNS_ON) || 'ubuntu-latest' }}
+    steps:
+      - name: Add needs-triage when the issue has no state label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        # A filer (or a template) may already have applied a state label; only the
+        # absence of all eight is ungraded. Grep is anchored to whole lines so
+        # `needs-triage` cannot match `needs-ruling` or a future `needs-*` label.
+        run: |
+          set -euo pipefail
+          labels=$(gh issue view "$NUMBER" --json labels --jq '.labels[].name')
+          states=$(printf '%s\n' "$labels" \
+            | grep -xE 'agent-ready|human-ready|needs-ruling|blocked|needs-triage|idea|umbrella|architecture' \
+            || true)
+          if [ -n "$states" ]; then
+            echo "Issue #$NUMBER already has a state label: $(echo "$states" | tr '\n' ' ')— leaving it alone."
+            exit 0
+          fi
+          gh issue edit "$NUMBER" --add-label needs-triage
+          echo "Issue #$NUMBER stamped needs-triage."
