@@ -160,13 +160,18 @@ Pin the microphone instead of unpairing the headset:
 device = "Microphone Array"
 ```
 
-Any case-insensitive substring of the device's name will do, and a name given in full wins
-over one that merely contains it: `Microphone` picks a device called exactly that, not
-`Microphone Array`. `byovox check` prints the
-names to choose from on its `inputs` row — they come from the audio host, so they are shorter
-than the Sound control panel's (`Microphone Array`, `Headset`). A name that matches no device
-is refused at startup with that same list, and `check` warns when the microphone it used is a
-hands-free endpoint. A re-run of setup keeps `capture.device` too.
+Or pick it from the tray's **Microphone** menu: it lists the inputs present each time the menu
+opens, checks the one in use, and writes the full name of the one you pick to `capture.device`;
+the next dictation records from it.
+
+Any case-insensitive substring of the device's Sound control panel name will do. A full name
+(`Microphone Array (Example Audio)`) or the short name before the parentheses wins over one that
+merely contains it: `Microphone` picks a device called exactly that, not `Microphone Array`.
+Two devices can share a short name (`Microphone (USB Mic)` and a virtual
+`Microphone (Screen Cast Audio)`) — then the full name picks the right one, or a part of it the other lacks. `byovox check`
+prints the names to choose from on its `inputs` row. A name that matches no device is refused
+at startup with that same list, and `check` warns when the microphone it used is a hands-free
+endpoint. A re-run of setup keeps `capture.device` too.
 
 ## Cue output
 

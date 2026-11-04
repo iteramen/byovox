@@ -453,7 +453,10 @@ fn sample_microphone(selector: &str, info: &DeviceInfo) -> Result<Audio, String>
 fn input_row() -> String {
     match input_names() {
         Ok(names) if names.is_empty() => "none".to_string(),
-        Ok(names) => names.join(" | "),
+        Ok(names) => {
+            let full: Vec<&str> = names.iter().map(|n| n.full.as_str()).collect();
+            full.join(" | ")
+        }
         Err(e) => e,
     }
 }

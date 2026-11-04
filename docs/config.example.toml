@@ -276,11 +276,11 @@ level = "info"
 # an audible jump in pitch and volume at every press and again at every release, and a worse
 # transcript than the built-in array would have given. The done cue byovox plays is output
 # only and does not do this.
-# Matched as a case-insensitive substring of the device's name as the audio host reports it,
-# which is shorter than the Sound control panel's spelling ("Microphone Array" rather than
-# "Microphone Array (Example Audio)"): run `byovox check`, which prints
-# the device it used and lists every input name on its `inputs` row, and copy a word out of
-# the one you want. A name given in full picks that device even when another name contains it
+# Matched as a case-insensitive substring of the device's Sound control panel name
+# ("Microphone Array (Example Audio)"): run `byovox check`, which prints the device it used and
+# lists every input name on its `inputs` row, and copy a word out of the one you want, or pick
+# it from the tray's Microphone menu, which writes the full name here. A full name picks that
+# device; so does the short name before the parentheses, even when another name contains it
 # ("Microphone" beside "Microphone Array"); otherwise, if several match, the first the system
 # enumerates wins. A value that matches nothing is a startup error naming this key and
 # listing those names — never a silent fallback to the default.

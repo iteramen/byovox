@@ -291,6 +291,7 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
             cue: cfg.indicator.cue,
             cue_volume: cfg.indicator.cue_volume as f32,
             version: env!("CARGO_PKG_VERSION"),
+            device: cfg.capture.device.clone(),
         },
         shared,
         ui_tx,

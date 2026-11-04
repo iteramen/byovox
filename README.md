@@ -134,7 +134,7 @@ ok   config    C:\Users\you\AppData\Roaming\byovox\config\config.toml
      update    on: one anonymous version request per day to api.github.com (update.check = false turns it off)
 ok   hotkey    ControlRight hold, cancel Escape
 ok   backends  hotkey=hook layout=win32 inject=type,paste,clipboard-only
-ok   mic       Microphone Array (48000 Hz, 2 ch, F32)  peak -21.7 dBFS, loudest 10 ms -22.90 dBFS RMS over 0.7s
+ok   mic       Microphone Array (Example Audio) (48000 Hz, 2 ch, F32)  peak -21.7 dBFS, loudest 10 ms -22.90 dBFS RMS over 0.7s
      layout    en → language_candidates=en,ru
 ok   stt       0.34s  p_nospeech=0.71 (would be dropped as silence)  "Thank you."
 ok   polish    0.46s  "So this is a test."

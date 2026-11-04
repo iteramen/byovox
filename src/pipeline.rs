@@ -51,6 +51,8 @@ pub struct Shared {
     pub mode: HotkeyMode,
     pub last_transcript: Option<String>,
     pub last_error: Option<String>,
+    /// A `capture.device` the tray picked, handed to the capture when the next dictation starts.
+    pub device: Option<String>,
 }
 
 impl Default for Shared {
@@ -63,6 +65,7 @@ impl Default for Shared {
             mode: HotkeyMode::Hold,
             last_transcript: None,
             last_error: None,
+            device: None,
         }
     }
 }
@@ -304,6 +307,10 @@ impl Pipeline {
     fn begin(&mut self, now: Instant) {
         let layout = self.layout.current();
         let language = self.policy.resolve(layout);
+        let picked = self.shared.lock().unwrap().device.take();
+        if let Some(device) = picked {
+            self.capture.set_device(&device);
+        }
         if let Err(e) = self.capture.start() {
             tracing::debug!(error = %e, "microphone open error");
             tracing::error!(error = summary(&e), "microphone open failed");
@@ -1340,6 +1347,21 @@ mod tests {
         assert_eq!(r.cap.starts(), 2);
         assert_eq!(r.cap.stops(), 2);
         assert_eq!(r.stt.calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_microphone_picked_in_the_tray_is_opened_by_the_next_dictation_only() {
+        let mut r = rig(FakeTranscriber::ok("hi"), None, false, false);
+        r.p.shared().lock().unwrap().device = Some("Microphone (Example USB)".into());
+        dictate(&mut r, Duration::from_secs(1));
+        assert_eq!(r.p.shared().lock().unwrap().device, None, "taken once");
+        *r.cap.device.lock().unwrap() = None;
+        dictate(&mut r, Duration::from_secs(1));
+        assert_eq!(
+            *r.cap.opened_on.lock().unwrap(),
+            [Some("Microphone (Example USB)".to_string()), None],
+            "the first start opens on the pick; the second is not set again"
+        );
     }
 
     #[test]

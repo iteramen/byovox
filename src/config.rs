@@ -231,7 +231,7 @@ impl Default for IndicatorConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct CaptureConfig {
-    /// Case-insensitive substring of an input device name; empty for the system default (see `capture::select`).
+    /// An input's full or short name, or a case-insensitive part of the full one; empty for the system default (see `capture::select`).
     pub device: String,
 }
 
