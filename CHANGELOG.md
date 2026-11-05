@@ -7,7 +7,7 @@ Each release is a tag; the zip, its `SHA256SUMS` and a build-provenance attestat
 published from it. 0.1.0 to 0.4.0 were released privately, under MIT, before this repository
 went public; their notes are kept below.
 
-## Unreleased
+## 0.6.0 — 2026-11-05
 
 Added
 - A Microphone menu in the tray lists the inputs present each time it opens and writes the
