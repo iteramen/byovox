@@ -20,6 +20,9 @@ Changed
 - Building from source needs Rust 1.92 (was 1.88). The tray crates move to tray-icon 0.26
   and muda 0.21; on Linux the tray is a DBus status icon without GTK, which drops the
   unsound glib 0.18 (GHSA-wrw7-89jp-8q8g).
+- A speech request that runs past `stt.timeout_s` says so in the log, the tray and
+  `byovox status`, with the seconds it was set to and that a long clip on a slow server may
+  need a higher value. The error was `stt timeout`, without either.
 
 Fixed
 - byovox started by a double-click, with a config it refuses, keeps its window open on the
