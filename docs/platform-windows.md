@@ -239,7 +239,9 @@ If the server setup started does not transcribe that second of silence within `s
 (30 s by default), setup says the model is likely too slow on this machine: pick a smaller
 model, or the CUDA build on a machine with an NVIDIA GPU. To wait longer instead, answer `k`
 to keep the server, then raise `timeout_s` under `[stt]` in the file setup writes; every
-dictation can then wait that long. A re-run of setup keeps it.
+dictation can then wait that long. A re-run of setup keeps it. A dictation that runs past it
+later fails with an error naming `stt.timeout_s` and its seconds, in the log, the tray and
+`byovox status`: a long clip on a slow server may need a higher value.
 
 The rest of this section is the same server by hand.
 
