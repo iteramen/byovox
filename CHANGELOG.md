@@ -21,6 +21,10 @@ Changed
   and muda 0.21; on Linux the tray is a DBus status icon without GTK, which drops the
   unsound glib 0.18 (GHSA-wrw7-89jp-8q8g).
 
+Fixed
+- byovox started by a double-click, with a config it refuses, keeps its window open on the
+  error until Enter is pressed, instead of closing before it can be read.
+
 ## 0.5.0 — 2026-10-10
 
 Changed

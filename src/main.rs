@@ -111,8 +111,27 @@ fn main() {
     };
     if let Err(e) = result {
         eprintln!("byovox: {e:#}");
+        if console_closes_on_exit() {
+            eprintln!("\npress Enter to close");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
         std::process::exit(2);
     }
+}
+
+/// A double-clicked byovox gets a console of its own, which closes with it and takes the error along.
+#[cfg(windows)]
+fn console_closes_on_exit() -> bool {
+    use std::io::IsTerminal;
+    let mut ids = [0u32; 2];
+    // SAFETY: the buffer outlives the call, which writes at most its length.
+    let attached = unsafe { windows::Win32::System::Console::GetConsoleProcessList(&mut ids) };
+    attached == 1 && std::io::stdin().is_terminal()
+}
+
+#[cfg(not(windows))]
+fn console_closes_on_exit() -> bool {
+    false
 }
 
 /// Detached so closing the terminal cannot take the tray icon with it; the daemon's stderr is `NUL`, so refusals are reported here.
