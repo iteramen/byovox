@@ -24,6 +24,10 @@ Changed
   `byovox status`, with the seconds it was set to and that a long clip on a slow server may
   need a higher value. The error was `stt timeout`, without either.
 
+Fixed
+- byovox started by a double-click, with a config it refuses, keeps its window open on the
+  error until Enter is pressed, instead of closing before it can be read.
+
 ## 0.5.0 — 2026-10-10
 
 Changed
