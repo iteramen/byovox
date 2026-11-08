@@ -249,3 +249,27 @@ model is in [SECURITY.md](../SECURITY.md).
 - Linux (Wayland and X11) and macOS backends for every platform trait, and their autostart.
 - Linux and macOS release archives; until then `cargo install --git` builds from source.
 - A per-lane `hosted` flag: `hosted` exists only on `[stt]` and `[polish]`.
+
+## Read selected text aloud
+
+Windows native `RegisterHotKey` registers the read chord, sharing a message-pump thread with the dictation hook.
+Its event carries the foreground HWND when Windows delivers the shortcut. `read_aloud_runtime::Manager` reads one
+explicit contiguous UIA TextPattern selection only if that window is still foreground. There is
+no clipboard fallback or whole-document fallback. Password fields and unsupported selections
+fail with fixed errors. Both before and after UIA access, the source window is checked.
+
+The action dispatcher cancels TTS before forwarding dictation/cancel events. Pending forwarded
+pipeline actions remain counted until handled or drained, preventing a subsequent read action
+from starting in the gap before the pipeline has opened its microphone and updated state.
+One serial TTS worker and one pending selection bound work; generation checks fence player,
+completion and UI messages. Stop halts output immediately, clears pending text and discards late
+network replies. A blocking HTTP request can finish until its timeout, but cannot play afterwards.
+Playback uses the default output via rodio, never the microphone or dictation logs.
+
+`read_aloud::TtsConfig` defines English/default and separate HE/RU voice/endpoint/token lanes.
+Dominant Latin/Hebrew/Cyrillic script selects a lane per ≤500-character chunk; unsupported scripts
+and missing voices refuse the whole selection before HTTP. The total is ≤20,000 code points.
+POST `/audio/speech` requests non-streaming PCM16 WAV with model, voice, input and speed. Both
+finite WAV lengths and Kokoro's RIFF/data streaming sentinels are accepted from a bounded body.
+Other malformed chunks, unsupported rates/channels/formats or >120 seconds per chunk are refused.
+HE/RU scaffolding does not imply configured or qualified HE/RU backends.

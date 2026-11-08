@@ -104,6 +104,8 @@ pub enum MenuAction {
 #[derive(Debug, Clone)]
 pub enum UserEvent {
     Indicator(IndicatorState),
+    /// Generation checked at delivery, so cancelled read-aloud cannot replace a newer dictation indicator.
+    ReadAloud(u64, Arc<std::sync::atomic::AtomicU64>, IndicatorState),
     Menu(MenuAction),
     /// The cue sink may be bound to a removed endpoint. Posted from a WASAPI thread, so it carries nothing.
     AudioDeviceChanged,
@@ -682,6 +684,21 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Indicator(s) => self.apply(s, true),
+            UserEvent::ReadAloud(id, generation, state) => {
+                if generation.load(std::sync::atomic::Ordering::SeqCst) == id {
+                    if shared_of(&self.shared).state == "idle" {
+                        self.apply(state, false);
+                    } else if state == IndicatorState::Error {
+                        // A refusal must not replace the live recording indicator or play into the microphone.
+                        #[cfg(windows)]
+                        if let (Some(tray), Some(message)) =
+                            (&self.tray, shared_of(&self.shared).last_error.clone())
+                        {
+                            let _ = show_balloon(tray, "byovox read aloud", &message);
+                        }
+                    }
+                }
+            }
             UserEvent::Menu(a) => self.menu(a, event_loop),
             // Scheduled only: `about_to_wait` re-opens once the disconnect burst has gone quiet.
             UserEvent::AudioDeviceChanged => self.reopen.notified(Instant::now()),

@@ -404,3 +404,13 @@ Transcript text is logged only at `logging.level = "debug"`; at `info` the log c
 timings, the language sent and the rung used, never what you said. The capture log is the
 exception: with `capture_log.enabled = true` it stores every raw and polished transcript, by
 design — that is what it is for.
+
+## Read-aloud selection
+
+The optional read chord uses native `RegisterHotKey` with no auto-repeat and can be changed in `[tts]`. Registration failure is a visible error; select another chord and restart. Only Ctrl/Alt/Shift/Win are supported as its modifiers, with a non-modifier trigger; configured left/right sides are checked when delivered. Disable releases the registration; Enable reacquires it and reports a conflict if someone else claimed it.
+The default is **left** Ctrl + **left** Alt + R. UI Automation TextPattern must expose exactly one
+selected range in the focused foreground element; standard supported text controls work, while
+some custom or elevated applications refuse access. No Ctrl+C or document fallback is attempted.
+The foreground window is captured when Windows delivers the shortcut and checked around selection access. The second
+press stops playback, as do Escape, Disable and starting dictation. Sound uses the default
+Windows output; TTS does not open the microphone. See README and the config example for routes.

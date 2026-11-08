@@ -9,6 +9,9 @@ pub enum HotkeyEvent {
     Released,
     Toggle,
     Cancel,
+    /// Foreground window captured when Windows delivers the read shortcut.
+    ReadAloud(isize),
+    ReadAloudUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

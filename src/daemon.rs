@@ -220,6 +220,40 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
     let shared = pipe.shared();
 
     let (tx, rx) = channel::<hotkey::HotkeyEvent>();
+    let manager =
+        crate::read_aloud_runtime::Manager::new(cfg.tts.clone(), shared.clone(), proxy.clone())?;
+    let (dispatch_tx, dispatch_rx) = channel::<hotkey::HotkeyEvent>();
+    let pipeline_tx = tx;
+    let action_state = shared.clone();
+    std::thread::Builder::new()
+        .name("byovox-actions".into())
+        .spawn(move || {
+            while let Ok(event) = dispatch_rx.recv() {
+                match event {
+                    hotkey::HotkeyEvent::ReadAloud(window) => manager.toggle(window),
+                    hotkey::HotkeyEvent::ReadAloudUnavailable => manager.unavailable(),
+                    other => {
+                        if matches!(
+                            other,
+                            hotkey::HotkeyEvent::Pressed
+                                | hotkey::HotkeyEvent::Toggle
+                                | hotkey::HotkeyEvent::Cancel
+                        ) {
+                            manager.stop();
+                        }
+                        action_state
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .pending_actions += 1;
+                        if pipeline_tx.send(other).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            manager.stop();
+        })?;
+    let tx = dispatch_tx;
     let backend_tx = tx.clone();
     let ui_tx = tx.clone();
     let ipc_shared = shared.clone();

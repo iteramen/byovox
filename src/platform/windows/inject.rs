@@ -247,6 +247,61 @@ fn automation() -> Result<IUIAutomation, String> {
     Ok(uia)
 }
 
+/// Read only one explicit selected range. Never fall back to a document/value or clipboard copy.
+pub fn selected_text(expected_window: isize) -> Result<String, String> {
+    let _com = Apartment::enter().map_err(|_| "Read aloud: Windows text access unavailable")?;
+    // SAFETY: owned COM interfaces stay in this apartment; no window is activated or modified.
+    unsafe {
+        let foreground = GetForegroundWindow();
+        if foreground.is_invalid() || foreground.0 as isize != expected_window {
+            return Err("Read aloud: the selected window changed; select again".into());
+        }
+        let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
+        let focused = uia
+            .GetFocusedElement()
+            .map_err(|_| "Read aloud: select text first")?;
+        if focused
+            .CurrentIsPassword()
+            .map_err(|_| "Read aloud: cannot verify text field")?
+            .as_bool()
+        {
+            return Err("Read aloud: password fields are excluded".into());
+        }
+        if foreground.is_invalid() || top_level(&uia, &focused) != Some(foreground) {
+            return Err("Read aloud: the selected window changed; select again".into());
+        }
+        let pattern = focused
+            .GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+            .map_err(|_| "Read aloud: this application does not expose selected text")?;
+        let ranges = pattern
+            .GetSelection()
+            .map_err(|_| "Read aloud: select text first")?;
+        if ranges
+            .Length()
+            .map_err(|_| "Read aloud: cannot read selection")?
+            != 1
+        {
+            return Err("Read aloud: select one contiguous text range".into());
+        }
+        let limit = (crate::read_aloud::MAX_TEXT * 2 + 1) as i32;
+        let raw = ranges
+            .GetElement(0)
+            .and_then(|r| r.GetText(limit))
+            .map_err(|_| "Read aloud: cannot read selection")?;
+        if raw.len() >= limit as usize {
+            return Err("Read aloud: selection exceeds 20,000 characters".into());
+        }
+        let text = raw.to_string();
+        if foreground != GetForegroundWindow() {
+            return Err("Read aloud: the selected window changed; select again".into());
+        }
+        if text.trim().is_empty() {
+            return Err("Read aloud: select text first".into());
+        }
+        Ok(text)
+    }
+}
+
 /// The window an element lives in, by UIA ancestry, not the foreground (WhatsApp's box is a hidden WebView2).
 /// # Safety
 /// The caller holds the apartment both interfaces were made in.

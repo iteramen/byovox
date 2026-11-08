@@ -15,6 +15,7 @@ pub struct Config {
     pub language: LanguageConfig,
     pub polish: PolishConfig,
     pub hotkey: HotkeyConfig,
+    pub tts: crate::read_aloud::TtsConfig,
     pub inject: InjectConfig,
     pub indicator: IndicatorConfig,
     pub capture: CaptureConfig,
@@ -404,6 +405,10 @@ pub fn load(path: &Path) -> Result<Config> {
 
 /// Runs on the one path every command loads through, so a bad value fails the daemon and `byovox check` up front.
 fn validate(cfg: &Config) -> Result<()> {
+    cfg.tts.validate().map_err(anyhow::Error::msg)?;
+    cfg.tts
+        .validate_hotkeys(&cfg.hotkey.key, &cfg.hotkey.cancel_key)
+        .map_err(anyhow::Error::msg)?;
     if cfg.stt.base_url.trim().is_empty() {
         bail!(
             "stt.base_url is empty: set it to your speech-to-text server, e.g. http://127.0.0.1:8770/v1"

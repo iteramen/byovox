@@ -1,6 +1,6 @@
 # Privacy policy — byovox
 
-**Effective: 2026-10-10.**
+**Effective: 2026-11-08 (read-aloud implementation draft).**
 
 byovox is a Windows push-to-talk dictation tool. You hold a hotkey, speak, release, and the
 transcript is typed into the window you were in. byovox runs no server of its own and has no
@@ -222,3 +222,25 @@ here.
 
 Questions about this policy or your data: byovox.licensing@gmail.com. Non-sensitive questions are
 also welcome as [GitHub issues](https://github.com/iteramen/byovox/issues).
+
+## Optional read aloud
+
+With `[tts].enabled = true`, the separate configurable hotkey reads one explicit selected text
+range from the foreground application using Windows UI Automation. It refuses password fields,
+empty/unsupported selections and a window changed since Windows delivered the shortcut; it never falls back to
+the clipboard or whole document (`platform::windows::inject::selected_text`). Only that text goes
+to your configured TTS endpoint, in chunks, with model, voice and speed (`read_aloud::synthesize`).
+The TTS server can retain it under its own policy. HTTPS verifies certificates; remote HTTP is
+possible and `byovox check` warns about it. Use a trusted encrypted connection for private text.
+
+TTS credentials are separate from STT/cleanup. A language lane receives only its own configured
+token unless `inherit_token = true` explicitly selects the default TTS credential. Requests follow
+no redirects. Selected text, generated audio and server response bodies are never written to logs,
+files, the clipboard, capture history or `byovox last`, even at debug level. Only fixed status and
+failure messages are shown. The TOML retains non-secret TTS configuration and token references.
+
+The shortcut toggles reading; Escape, Disable or starting dictation cancels it. Audio stops and
+late replies are discarded, though a request already received by the server can finish there.
+Reading never opens the microphone or injects text. Hebrew/Russian configuration slots require
+supported voices and do not reuse an English voice silently. Dominant script chooses the route,
+so Latin-script text uses the English/default route rather than a semantic language detector.

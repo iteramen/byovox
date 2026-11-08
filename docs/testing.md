@@ -90,3 +90,31 @@ map out, so every row below would log `auto`.
 - [ ] with a Bluetooth headset connected as the default recording device and `capture.device = "Microphone Array"`: `check`'s `mic` row names the array at 48 kHz, and a dictation leaves music in the headphones untouched (no pitch jump on press or release); a name that matches nothing → exit 2 listing the devices
 - [ ] tray menu, Microphone: it lists System default and every input by its full name, the one in use checked; plug a USB mic in or out and reopen the menu — the list follows. Pick one: config.toml's `capture.device` holds its full name, the next dictation records from it (`check`'s `mic` row names it), and the other keys and comment lines are unchanged (a comment at the end of the `device` line itself is dropped); pick System default → `device = ""`
 - [ ] `byovox setup`'s closing microphone level step, Enter at the offer: stay quiet for the 3 s floor capture, then speak a sentence for the 5 s one — the floor prints with no warning, and a normal speaking volume prints neither "this quiet, byovox would discard the dictation" nor "this level is low" nor "clipping". Repeat muted or very quiet → "this quiet, byovox would discard the dictation"; repeat close to the mic at high volume → "clipping". `n` at the offer skips straight to the closing `check`
+
+## Read-aloud qualification (2026-11-08)
+
+`cargo run --locked --example read_aloud_probe -- <own-TTS-base>` exercised the real HTTP client
+and decoded the live Kokoro PCM16 mono/24 kHz response. Its streaming RIFF/data length sentinels
+first exposed a compatibility failure; both client decoders now have a regression fixture.
+
+The manual Windows `read_aloud_desktop_probe` used only its own synthetic English paragraph,
+production UIA selection/TTS/rodio paths and native registered Ctrl+Alt+R. It passed selected
+range → live TTS → active playback; a second configured shortcut stopped it, with no playback
+1.5 seconds later and zero dictation events. The owner reported Speaking. No clipboard, mic,
+ordinary document, production config or production daemon was used.
+
+Early hook-based fixture attempts did not trigger read actions and are excluded. Native hotkey
+registration delivered the actions. The probe now displays Requesting speech before playback,
+so a second press during synthesis is clearly a cancel. Earlier repeated presses cancelled pending
+requests, rather than proving a synthesis failure. Computer-use automation could not initialize;
+the owner performed selection and shortcut presses. No injected-input test is counted as a pass.
+
+A separate `read_aloud_registration_probe` passed a real OS registration conflict, its actionable
+failure event, Disable releasing the chord to another registration, and Enable reacquiring it.
+This uses registration only, not injected input or a full tray-menu test.
+
+Remaining manual checklist: empty/unsupported/password controls; changed foreground during
+selection; Escape/Disable and dictation interruption; shortcut conflict/disabled state; long and
+mixed-language speech; elevated/custom applications; actual output-device loss. Hebrew/Russian
+voices/backends remain unconfigured and unqualified; unit tests cover routing and refusal without
+English fallback. The full daemon/release UI is not implied by the isolated fixture pass.

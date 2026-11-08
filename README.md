@@ -219,3 +219,29 @@ Full threat model: [SECURITY.md](SECURITY.md). Windows specifics:
 
 License: [PolyForm Noncommercial 1.0.0](LICENSE). Free for personal use and for noncommercial
 organisations; any commercial use needs a license — byovox.licensing@gmail.com.
+
+## Read selected text aloud (Windows)
+
+Read aloud is off by default. Configure `[tts]` in your TOML (see
+[the example](docs/config.example.toml)), set `enabled = true`, and restart byovox:
+
+```toml
+[tts]
+enabled = true
+hotkey = "ControlLeft+AltLeft+R"
+base_url = "http://<tailnet-host>:8770/v1"
+model = "kokoro"
+voice = "af_bella"
+```
+
+Select a contiguous text range, then press the configured chord. Press it again, or Escape, to
+stop; starting dictation also stops reading. Use **left** Ctrl and **left** Alt for the example.
+Only the selected text goes to your TTS server. Nothing is copied, typed, recorded or saved.
+The application must expose its selection through Windows UI Automation TextPattern; an empty,
+password or unsupported selection is refused. A changed foreground window before selection is
+read is refused. The server can retain requests under its own policy.
+
+English is the first target. Hebrew/Russian endpoint and voice slots are scaffolded but require
+supported server voices; missing voices refuse reading, with no English substitution. Routing is
+by dominant script per chunk, not semantic language detection: Latin-script text uses English.
+`byovox check` reports configuration only and does not exercise read-aloud selection or playback.

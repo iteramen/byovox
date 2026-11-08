@@ -106,3 +106,32 @@ If any of the above matters to you:
 - Leave `logging.level = "info"`. `debug` writes your transcripts to disk.
 - Prefer the `type` rung over `paste` if clipboard history or cloud clipboard sync is on.
 - Review what your polish endpoint is: it sees every transcript before you do.
+
+### Explicit-selection read aloud
+
+Read aloud is off by default (`TtsConfig.enabled`). The hook event binds UIA access to the HWND
+foreground when Windows delivers the shortcut. `selected_text` excludes passwords, requires one non-empty contiguous
+TextPattern selection and checks the same foreground window before/after access. It does not
+activate windows, read a document/value fallback, touch the clipboard or inject keystrokes.
+UIA connection/transaction timeouts are one second; at most 20,000 code points are accepted.
+
+All ≤500-character chunks and dominant-script routes are prepared before any request. HE/RU need
+configured voices; unknown dominant scripts and missing routes fail without a partial upload.
+TTS has separate bearer-token references. A lane inherits the default TTS token only explicitly;
+STT/cleanup tokens are unused. HTTP(S) bases reject embedded credentials, queries and fragments.
+Redirects are disabled, and server bodies never reach errors/logs. Each response is bounded to
+12 MiB and PCM16 mono/stereo WAV at 8–48 kHz, ≤120 seconds. Known streaming length sentinels are
+completed from the bounded body; arbitrary truncation/oversized declarations are rejected.
+
+One serial worker, one pending selection and a generation fence prevent unbounded queued text
+and late playback/UI updates. Stop/Disable/dictation clears pending work and stops the player;
+a blocking network request may finish until its timeout, but cannot play. Queued pipeline actions
+are counted until handled/drained so TTS cannot start before a pending microphone action becomes
+visible in pipeline state. Text/audio never enter `last`, capture logs, files or the clipboard.
+A debug fixture records only configured-shortcut event counts and its own focus/playback flags;
+it stores no selected text or arbitrary key history.
+
+In scope: text read without explicit selection; password content read; wrong-window text accessed;
+credentials redirected or inherited without consent; selected text/audio persisted or echoed by
+errors; audio played after cancellation. The configured TTS server's retention and inaccurate
+third-party accessibility metadata are outside the client boundary.
