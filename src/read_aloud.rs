@@ -93,7 +93,17 @@ impl TtsConfig {
         if self.enabled {
             let chord = crate::hotkey::parse_chord(&self.hotkey)
                 .map_err(|_| "tts.hotkey: invalid chord")?;
-            if matches!(chord.trigger.as_str(), "ControlLeft" | "ControlRight" | "AltLeft" | "AltRight" | "ShiftLeft" | "ShiftRight" | "MetaLeft" | "MetaRight") {
+            if matches!(
+                chord.trigger.as_str(),
+                "ControlLeft"
+                    | "ControlRight"
+                    | "AltLeft"
+                    | "AltRight"
+                    | "ShiftLeft"
+                    | "ShiftRight"
+                    | "MetaLeft"
+                    | "MetaRight"
+            ) {
                 return Err("tts.hotkey: use a non-modifier trigger key".into());
             }
             if chord.modifiers.iter().any(|name| {
