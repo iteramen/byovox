@@ -8,8 +8,8 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern,
     IUIAutomationValuePattern, SupportedTextSelection_None, TextPatternRangeEndpoint_End,
-    TextPatternRangeEndpoint_Start, TreeScope_Subtree, UIA_ControlTypePropertyId,
-    UIA_DocumentControlTypeId, UIA_E_NOTSUPPORTED, UIA_IsOffscreenPropertyId, UIA_TextPatternId,
+    TextPatternRangeEndpoint_Start, TreeScope_Subtree, UIA_E_NOTSUPPORTED,
+    UIA_IsOffscreenPropertyId, UIA_IsTextPatternAvailablePropertyId, UIA_TextPatternId,
     UIA_ValuePatternId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -292,58 +292,55 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
         let root = uia
             .ElementFromHandle(foreground)
             .map_err(|_| "Read aloud: cannot inspect selected window")?;
-        // Ask UIA for document providers in one filtered snapshot. Walking unrelated toolbar
-        // leaves can encounter disappearing controls and incorrectly block both actions.
+        // Query visible TextPattern providers, not only Document-role controls: modern editors
+        // and browser text surfaces can expose the selection through an Edit or other role.
         let condition = uia
-            .CreatePropertyCondition(
-                UIA_ControlTypePropertyId,
-                &VARIANT::from(UIA_DocumentControlTypeId.0),
-            )
+            .CreatePropertyCondition(UIA_IsTextPatternAvailablePropertyId, &VARIANT::from(true))
             .map_err(|error| {
                 format!(
-                    "Read aloud: document selection filter unavailable (0x{:08X})",
+                    "Read aloud: text selection filter unavailable (0x{:08X})",
                     error.code().0 as u32
                 )
             })?;
         let visible = uia
             .CreatePropertyCondition(UIA_IsOffscreenPropertyId, &VARIANT::from(false))
-            .map_err(|_| "Read aloud: visible document filter unavailable")?;
+            .map_err(|_| "Read aloud: visible text filter unavailable")?;
         let condition = uia
             .CreateAndCondition(&condition, &visible)
-            .map_err(|_| "Read aloud: visible document filter unavailable")?;
-        let documents = root
+            .map_err(|_| "Read aloud: visible text filter unavailable")?;
+        let providers = root
             .FindAll(TreeScope_Subtree, &condition)
             .map_err(|error| {
                 format!(
-                    "Read aloud: document selection lookup unavailable (0x{:08X})",
+                    "Read aloud: text selection lookup unavailable (0x{:08X})",
                     error.code().0 as u32
                 )
             })?;
-        let count = documents
+        let count = providers
             .Length()
-            .map_err(|_| "Read aloud: cannot inspect document selections")?;
+            .map_err(|_| "Read aloud: cannot inspect text selections")?;
         if count > 128 {
             return Err(format!(
-                "Read aloud: too many visible document selection providers ({count})"
+                "Read aloud: too many visible text selection providers ({count})"
             ));
         }
         for index in 0..count {
             if Instant::now() >= deadline {
                 return Err("Read aloud: selection lookup exceeded its limit; select again".into());
             }
-            let element = documents
+            let element = providers
                 .GetElement(index)
-                .map_err(|_| "Read aloud: selected document became unavailable")?;
+                .map_err(|_| "Read aloud: selected text control became unavailable")?;
             if element
                 .CurrentIsOffscreen()
-                .map_err(|_| "Read aloud: cannot verify selected document")?
+                .map_err(|_| "Read aloud: cannot verify selected text control")?
                 .as_bool()
             {
                 continue;
             }
             if element
                 .CurrentIsPassword()
-                .map_err(|_| "Read aloud: cannot verify selected document")?
+                .map_err(|_| "Read aloud: cannot verify selected text control")?
                 .as_bool()
             {
                 return Err("Read aloud: password fields are excluded".into());

@@ -239,7 +239,7 @@ selection it dictates using your normal hold/toggle mode. Releasing a reading pr
 stop playback. Another press or Escape stops reading. An explicit different `tts.hotkey` opts into
 a separate read-only shortcut, where an empty selection is refused.
 
-The focused control and visible foreground document selection providers are checked, so highlighting
+The focused control and visible foreground text-selection providers are checked, so highlighting
 chat text can work even when the composer retains focus. Only explicit non-empty TextPattern
 ranges are read; no document/value/clipboard fallback is used. Passwords, ambiguous selections,
 provider errors and lookup limits refuse the contextual action without opening the microphone.

@@ -171,3 +171,16 @@ while these repairs were built.
 The active bound is 128 returned visible document providers (with the same time budget), rather
 than limiting total documents in a long conversation to 32 before checking visibility. No text is
 read while filtering providers; only explicit selected ranges are fetched afterwards.
+
+## Separate-function qualification (2026-11-10)
+
+The owner withdrew the shared shortcut for now and requested independent tests. The local
+configuration uses CtrlLeft+ShiftLeft+Z for dictation and CtrlLeft+AltLeft+R for narration; the
+binary and physical microphone were unchanged during that separation. WhatsApp dictation then
+passed (text landed). Preserve this known-working path while debugging narration.
+
+Narration in Notepad failed with no selection state exposed. The fallback query had filtered
+Document control roles, which can miss selection providers exposed as Edit or other control roles. It
+now filters IsTextPatternAvailable=true and IsOffscreen=false instead. GetText remains restricted
+to explicit non-degenerate selected ranges, with the same bounds/ambiguity/password/origin checks.
+Notepad narration acceptance of this follow-up is pending; the previous failed attempts are not passes.

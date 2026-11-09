@@ -259,12 +259,11 @@ empty selection forwards the original dictation press/release, and an active rea
 Recording/working pipeline actions retain their existing handling, without a fresh selection query.
 An explicit different `tts.hotkey` enables the optional native RegisterHotKey read-only binding.
 
-`selected_text_optional` checks the focused element and foreground document providers, addressing
+`selected_text_optional` checks the focused element and visible foreground TextPattern providers, addressing
 chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
 text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
-selections. A filtered UIA document snapshot returns at most 128 visible providers within a 1.5-second budget, plus at most the current
-platform call's one-second timeout. A supported document provider owns its content; message nodes
-are not traversed. Passwords, errors, limits or a window change refuse without a microphone fallback.
+selections. A filtered UIA TextPattern-provider snapshot returns at most 128 visible providers within a 1.5-second budget, plus at most the current
+platform call's one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, limits or a window change refuse without a microphone fallback.
 There is no clipboard, value or whole-document fallback.
 
 The action dispatcher cancels TTS before forwarding dictation/cancel events. Pending forwarded

@@ -229,7 +229,7 @@ With `[tts].enabled = true`, the existing dictation shortcut reads explicitly se
 default; a verified empty selection retains normal microphone dictation behavior. Another press
 stops reading, and its release never starts/stops dictation. A separate read-only shortcut remains
 optional. On the explicit gesture, Windows UI Automation checks the focused control and visible
-foreground document selection providers. It uses a filtered UIA document snapshot with at most 128 returned visible providers and a 1.5-second lookup
+foreground text-selection providers. It uses a filtered UIA TextPattern-provider snapshot with at most 128 returned visible TextPattern providers and a 1.5-second lookup
 budget (a platform call can additionally take its configured one-second timeout). GetText is used
 only for a non-degenerate selected range. Password fields, conflicting ranges, provider/limit errors
 or a changed window refuse the action without opening the microphone. It never falls back to the
