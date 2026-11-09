@@ -407,10 +407,15 @@ design — that is what it is for.
 
 ## Read-aloud selection
 
-The optional read chord uses native `RegisterHotKey` with no auto-repeat and can be changed in `[tts]`. Registration failure is a visible error; select another chord and restart. Only Ctrl/Alt/Shift/Win are supported as its modifiers, with a non-modifier trigger; configured left/right sides are checked when delivered. Disable releases the registration; Enable reacquires it and reports a conflict if someone else claimed it.
-The default is **left** Ctrl + **left** Alt + R. UI Automation TextPattern must expose exactly one
-selected range in the focused foreground element; standard supported text controls work, while
-some custom or elevated applications refuse access. No Ctrl+C or document fallback is attempted.
-The foreground window is captured when Windows delivers the shortcut and checked around selection access. The second
-press stops playback, as do Escape, Disable and starting dictation. Sound uses the default
-Windows output; TTS does not open the microphone. See README and the config example for routes.
+With TTS enabled, the existing dictation shortcut is contextual by default (`tts.hotkey = ""`):
+selected text reads; no selection dictates. Releasing a reading press leaves speech running;
+press again or Escape to stop. Selection lookup covers the focused control and visible foreground
+document providers, so a focused browser composer does not hide a highlighted chat paragraph.
+Conflicting/unsupported selection state, passwords, errors and budget limits refuse without opening
+the microphone. Only explicit UIA selected ranges are read; there is no Ctrl+C or document fallback.
+
+An explicit different `tts.hotkey` opts into the separate native RegisterHotKey binding with no
+repeat. It accepts Ctrl/Alt/Shift/Win modifiers and a non-modifier trigger, checks configured sides,
+reports conflicts, releases on Disable and reacquires on Enable. The contextual mode uses the
+existing hook and supports the existing dictation key grammar, including bare modifiers. Sound
+uses the default Windows output; reading does not open the microphone.

@@ -1,12 +1,13 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{E_NOINTERFACE, E_POINTER, HWND};
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern,
-    IUIAutomationValuePattern, UIA_TextPatternId, UIA_ValuePatternId,
+    IUIAutomationValuePattern, TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
+    UIA_DocumentControlTypeId, UIA_E_NOTSUPPORTED, UIA_TextPatternId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -247,10 +248,16 @@ fn automation() -> Result<IUIAutomation, String> {
     Ok(uia)
 }
 
-/// Read only one explicit selected range. Never fall back to a document/value or clipboard copy.
+/// Read only explicit selected ranges, including a browser document outside the focused composer.
+/// No document/value/clipboard fallback: GetText is called only on a non-degenerate selection.
 pub fn selected_text(expected_window: isize) -> Result<String, String> {
+    selected_text_optional(expected_window)?.ok_or_else(|| "Read aloud: select text first".into())
+}
+
+pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, String> {
     let _com = Apartment::enter().map_err(|_| "Read aloud: Windows text access unavailable")?;
-    // SAFETY: owned COM interfaces stay in this apartment; no window is activated or modified.
+    let deadline = Instant::now() + Duration::from_millis(1500);
+    // SAFETY: all interfaces belong to this apartment; no element/window is activated or modified.
     unsafe {
         let foreground = GetForegroundWindow();
         if foreground.is_invalid() || foreground.0 as isize != expected_window {
@@ -259,7 +266,7 @@ pub fn selected_text(expected_window: isize) -> Result<String, String> {
         let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
         let focused = uia
             .GetFocusedElement()
-            .map_err(|_| "Read aloud: select text first")?;
+            .map_err(|_| "Read aloud: cannot inspect selection")?;
         if focused
             .CurrentIsPassword()
             .map_err(|_| "Read aloud: cannot verify text field")?
@@ -267,38 +274,146 @@ pub fn selected_text(expected_window: isize) -> Result<String, String> {
         {
             return Err("Read aloud: password fields are excluded".into());
         }
-        if foreground.is_invalid() || top_level(&uia, &focused) != Some(foreground) {
+        if top_level(&uia, &focused) != Some(foreground) {
             return Err("Read aloud: the selected window changed; select again".into());
         }
-        let pattern = focused
-            .GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
-            .map_err(|_| "Read aloud: this application does not expose selected text")?;
+        let mut selections = Vec::new();
+        let mut supported = false;
+        if let Some(text) = explicit_selection(&focused)? {
+            supported = true;
+            selections.push(text);
+        }
+        let root = uia
+            .ElementFromHandle(foreground)
+            .map_err(|_| "Read aloud: cannot inspect selected window")?;
+        let walker = uia
+            .ControlViewWalker()
+            .map_err(|_| "Read aloud: Windows text access unavailable")?;
+        let mut pending = vec![root];
+        let mut visited = 0;
+        while let Some(element) = pending.pop() {
+            visited += 1;
+            if visited > 200 || Instant::now() >= deadline {
+                return Err("Read aloud: selection lookup exceeded its limit; select again".into());
+            }
+            if element
+                .CurrentIsOffscreen()
+                .map_err(|_| "Read aloud: cannot verify selected window")?
+                .as_bool()
+            {
+                continue;
+            }
+            // Inspect only document selection providers, not names/values or individual chat messages.
+            if element
+                .CurrentControlType()
+                .map_err(|_| "Read aloud: cannot verify selected window")?
+                == UIA_DocumentControlTypeId
+                && !element
+                    .CurrentIsOffscreen()
+                    .map_err(|_| "Read aloud: cannot verify selected document")?
+                    .as_bool()
+            {
+                if element
+                    .CurrentIsPassword()
+                    .map_err(|_| "Read aloud: cannot verify selected document")?
+                    .as_bool()
+                {
+                    return Err("Read aloud: password fields are excluded".into());
+                }
+                if let Some(text) = explicit_selection(&element)? {
+                    supported = true;
+                    selections.push(text);
+                    // A document's selection provider is authoritative for its own content.
+                    continue;
+                }
+            }
+            let mut child = optional_selection_element(walker.GetFirstChildElement(&element))?;
+            while let Some(next) = child {
+                if pending.len() + visited >= 200 || Instant::now() >= deadline {
+                    return Err(
+                        "Read aloud: selection lookup exceeded its limit; select again".into(),
+                    );
+                }
+                child = optional_selection_element(walker.GetNextSiblingElement(&next))?;
+                pending.push(next);
+            }
+        }
+        if foreground != GetForegroundWindow() {
+            return Err("Read aloud: the selected window changed; select again".into());
+        }
+        if !supported {
+            return Err("Read aloud: this application does not expose selection state".into());
+        }
+        crate::read_aloud::unique_selection(selections)
+    }
+}
+
+fn optional_selection_element(
+    result: windows::core::Result<IUIAutomationElement>,
+) -> Result<Option<IUIAutomationElement>, String> {
+    match result {
+        Ok(element) => Ok(Some(element)),
+        Err(error) if error.code() == E_POINTER => Ok(None), // UIA's null child/sibling.
+        Err(_) => Err("Read aloud: selection provider became unavailable; select again".into()),
+    }
+}
+
+/// Outer None: no TextPattern provider; inner None: verified empty/caret selection.
+unsafe fn explicit_selection(
+    element: &IUIAutomationElement,
+) -> Result<Option<Option<String>>, String> {
+    unsafe {
+        let pattern =
+            match element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
+                Ok(pattern) => pattern,
+                Err(error)
+                    if error.code() == E_NOINTERFACE
+                        || error.code() == E_POINTER
+                        || error.code().0 as u32 == UIA_E_NOTSUPPORTED =>
+                {
+                    return Ok(None);
+                }
+                Err(_) => {
+                    return Err(
+                        "Read aloud: selection provider became unavailable; select again".into(),
+                    );
+                }
+            };
         let ranges = pattern
             .GetSelection()
-            .map_err(|_| "Read aloud: select text first")?;
-        if ranges
+            .map_err(|_| "Read aloud: cannot inspect selection")?;
+        let count = ranges
             .Length()
-            .map_err(|_| "Read aloud: cannot read selection")?
-            != 1
-        {
+            .map_err(|_| "Read aloud: cannot inspect selection")?;
+        if count == 0 {
+            return Ok(Some(None));
+        }
+        if count != 1 {
             return Err("Read aloud: select one contiguous text range".into());
         }
-        let limit = (crate::read_aloud::MAX_TEXT * 2 + 1) as i32;
-        let raw = ranges
+        let range = ranges
             .GetElement(0)
-            .and_then(|r| r.GetText(limit))
-            .map_err(|_| "Read aloud: cannot read selection")?;
+            .map_err(|_| "Read aloud: cannot inspect selection")?;
+        if range
+            .CompareEndpoints(
+                TextPatternRangeEndpoint_Start,
+                &range,
+                TextPatternRangeEndpoint_End,
+            )
+            .map_err(|_| "Read aloud: cannot verify selected range")?
+            == 0
+        {
+            return Ok(Some(None));
+        }
+        let limit = (crate::read_aloud::MAX_TEXT * 2 + 1) as i32;
+        let raw = range
+            .GetText(limit)
+            .map_err(|_| "Read aloud: cannot read selected range")?;
         if raw.len() >= limit as usize {
             return Err("Read aloud: selection exceeds 20,000 characters".into());
         }
         let text = raw.to_string();
-        if foreground != GetForegroundWindow() {
-            return Err("Read aloud: the selected window changed; select again".into());
-        }
-        if text.trim().is_empty() {
-            return Err("Read aloud: select text first".into());
-        }
-        Ok(text)
+        Ok(Some((!text.trim().is_empty()).then_some(text)))
     }
 }
 

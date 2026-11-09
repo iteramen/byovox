@@ -688,8 +688,9 @@ impl ApplicationHandler<UserEvent> for App {
                 if generation.load(std::sync::atomic::Ordering::SeqCst) == id {
                     if shared_of(&self.shared).state == "idle" {
                         self.apply(state, false);
-                    } else if state == IndicatorState::Error {
-                        // A refusal must not replace the live recording indicator or play into the microphone.
+                    }
+                    if state == IndicatorState::Error {
+                        // Show the fixed cause even when idle; never replace a recording indicator or play a cue.
                         #[cfg(windows)]
                         if let (Some(tray), Some(message)) =
                             (&self.tray, shared_of(&self.shared).last_error.clone())

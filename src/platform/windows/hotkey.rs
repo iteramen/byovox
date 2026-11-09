@@ -24,6 +24,7 @@ use crate::hotkey::{
 static SENDER: OnceLock<Mutex<Option<Sender<HotkeyEvent>>>> = OnceLock::new();
 static CHORD: OnceLock<Mutex<Option<ChordHook>>> = OnceLock::new();
 static CANCEL_VK: AtomicU32 = AtomicU32::new(0);
+static CONTEXTUAL: AtomicBool = AtomicBool::new(false);
 static ARMED: AtomicBool = AtomicBool::new(true);
 static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
 const READ_ARM_MESSAGE: u32 = WM_APP + 0x71;
@@ -112,6 +113,7 @@ pub struct HookHotkey {
     vks: Vec<u32>,
     cancel_vk: u32,
     read: Option<Chord>,
+    contextual: bool,
 }
 
 fn hot_key_modifier(name: &str) -> Option<HOT_KEY_MODIFIERS> {
@@ -184,6 +186,7 @@ impl HookHotkey {
             vks,
             cancel_vk,
             read: None,
+            contextual: false,
         })
     }
 
@@ -202,6 +205,11 @@ impl HookHotkey {
         }
         self.read = Some(other.chord);
         Ok(self)
+    }
+
+    pub fn with_contextual_read_aloud(mut self) -> Self {
+        self.contextual = true;
+        self
     }
 }
 
@@ -292,7 +300,15 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                         if ev == HotkeyEvent::Pressed && step.swallow {
                             defuse_modifiers();
                         }
-                        emit(ev);
+                        emit(
+                            if ev == HotkeyEvent::Pressed && CONTEXTUAL.load(Ordering::Relaxed) {
+                                HotkeyEvent::ContextPressed(
+                                    unsafe { GetForegroundWindow() }.0 as isize,
+                                )
+                            } else {
+                                ev
+                            },
+                        );
                     }
                     if step.swallow {
                         return LRESULT(1);
@@ -319,10 +335,12 @@ impl Hotkey for HookHotkey {
             vks,
             cancel_vk,
             read,
+            contextual,
         } = *self;
         let tracker = ChordTracker::new(&chord);
         *chord_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(ChordHook { vks, tracker });
         CANCEL_VK.store(cancel_vk, Ordering::Relaxed);
+        CONTEXTUAL.store(contextual, Ordering::Relaxed);
         *sender_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
         // SAFETY: standard hook installation; the hook is removed when the process exits.
         let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0) };

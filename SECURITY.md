@@ -109,8 +109,7 @@ If any of the above matters to you:
 
 ### Explicit-selection read aloud
 
-Read aloud is off by default (`TtsConfig.enabled`). The hook event binds UIA access to the HWND
-foreground when Windows delivers the shortcut. `selected_text` excludes passwords, requires one non-empty contiguous
+Read aloud is off by default (`TtsConfig.enabled`). The shortcut event binds UIA access to the foreground HWND. `selected_text` excludes passwords, requires one non-empty contiguous
 TextPattern selection and checks the same foreground window before/after access. It does not
 activate windows, read a document/value fallback, touch the clipboard or inject keystrokes.
 UIA connection/transaction timeouts are one second; at most 20,000 code points are accepted.
@@ -135,3 +134,18 @@ In scope: text read without explicit selection; password content read; wrong-win
 credentials redirected or inherited without consent; selected text/audio persisted or echoed by
 errors; audio played after cancellation. The configured TTS server's retention and inaccurate
 third-party accessibility metadata are outside the client boundary.
+
+### Contextual read/dictate shortcut
+
+When TTS is enabled, an empty `tts.hotkey` (the default), or the same chord as dictation, shares
+the existing dictation hook. A verified non-empty selection reads; a verified empty selection
+retains the existing recording behavior. Reader presses consume their release. Unsupported,
+ambiguous, password, provider-error or over-budget selection state refuses without a microphone
+fallback. An optional different TTS chord retains the dedicated registration behavior above.
+
+Lookup inspects the focused control and visible foreground document providers, bounded to 200
+nodes and a 1.5-second budget plus at most an in-progress platform call's one-second timeout.
+It never asks for an element name/value or document text. GetText is called only after selected
+range endpoints prove the range non-degenerate. Equal parent/child selections are deduplicated;
+different selected text is refused. Document providers are authoritative and their message/content
+children are not traversed. The source window is rechecked before a payload can reach TTS.

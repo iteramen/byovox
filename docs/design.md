@@ -252,11 +252,20 @@ model is in [SECURITY.md](../SECURITY.md).
 
 ## Read selected text aloud
 
-Windows native `RegisterHotKey` registers the read chord, sharing a message-pump thread with the dictation hook.
-Its event carries the foreground HWND when Windows delivers the shortcut. `read_aloud_runtime::Manager` reads one
-explicit contiguous UIA TextPattern selection only if that window is still foreground. There is
-no clipboard fallback or whole-document fallback. Password fields and unsupported selections
-fail with fixed errors. Both before and after UIA access, the source window is checked.
+The existing dictation hook emits a contextual press by default when TTS is enabled. The
+foreground HWND is captured before dispatch: a non-empty explicit selection reads, a verified
+empty selection forwards the original dictation press/release, and an active reader stops.
+`ContextGesture` consumes a reading press's release, preserving normal hold/toggle behavior.
+Recording/working pipeline actions retain their existing handling, without a fresh selection query.
+An explicit different `tts.hotkey` enables the optional native RegisterHotKey read-only binding.
+
+`selected_text_optional` checks the focused element and foreground document providers, addressing
+chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
+text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
+selections. Traversal is limited to 200 nodes and a 1.5-second budget, plus at most the current
+platform call's one-second timeout. A supported document provider owns its content; message nodes
+are not traversed. Passwords, errors, limits or a window change refuse without a microphone fallback.
+There is no clipboard, value or whole-document fallback.
 
 The action dispatcher cancels TTS before forwarding dictation/cancel events. Pending forwarded
 pipeline actions remain counted until handled or drained, preventing a subsequent read action

@@ -228,7 +228,23 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
     std::thread::Builder::new()
         .name("byovox-actions".into())
         .spawn(move || {
+            let mut gesture = hotkey::ContextGesture::default();
             while let Ok(event) = dispatch_rx.recv() {
+                let event = match event {
+                    hotkey::HotkeyEvent::ContextPressed(window) => {
+                        let Some(event) = gesture.press(manager.contextual(window)) else {
+                            continue;
+                        };
+                        event
+                    }
+                    hotkey::HotkeyEvent::Released => {
+                        let Some(event) = gesture.release() else {
+                            continue;
+                        };
+                        event
+                    }
+                    event => event,
+                };
                 match event {
                     hotkey::HotkeyEvent::ReadAloud(window) => manager.toggle(window),
                     hotkey::HotkeyEvent::ReadAloudUnavailable => manager.unavailable(),

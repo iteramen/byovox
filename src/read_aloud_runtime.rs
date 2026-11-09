@@ -10,10 +10,10 @@ use winit::event_loop::EventLoopProxy;
 
 type Pending = Arc<(Mutex<Option<(u64, Vec<(String, Endpoint)>)>>, Condvar)>;
 
-fn selection(window: isize) -> Result<String, String> {
+fn selection(window: isize) -> Result<Option<String>, String> {
     #[cfg(windows)]
     {
-        crate::platform::windows::inject::selected_text(window)
+        crate::platform::windows::inject::selected_text_optional(window)
     }
     #[cfg(not(windows))]
     {
@@ -208,11 +208,47 @@ impl Manager {
         );
     }
 
+    /// True consumes this physical press and its release; false keeps normal dictation handling.
+    pub fn contextual(&self, window: isize) -> bool {
+        if self.is_active() {
+            self.stop();
+            return true;
+        }
+        {
+            let shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
+            if !shared.enabled {
+                return true;
+            }
+            // A recording press must retain normal hold/toggle semantics regardless of selection.
+            if shared.state != "idle" || shared.pending_actions != 0 {
+                return false;
+            }
+        }
+        match selection(window) {
+            Ok(None) => false,
+            Ok(Some(text)) => {
+                self.begin(Ok(text));
+                true
+            }
+            Err(error) => {
+                self.begin(Err(error));
+                true
+            }
+        }
+    }
+
     pub fn toggle(&self, window: isize) {
-        if self.active.load(Ordering::SeqCst) != 0 {
+        if self.is_active() {
             self.stop();
             return;
         }
+        self.begin(
+            selection(window)
+                .and_then(|text| text.ok_or_else(|| "Read aloud: select text first".into())),
+        );
+    }
+
+    fn begin(&self, selected: Result<String, String>) {
         let id = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let result = (|| {
             {
@@ -224,8 +260,7 @@ impl Manager {
                     return Err("Read aloud: finish the current dictation first".into());
                 }
             }
-            let text = selection(window)?;
-            self.config.prepare(&text)
+            self.config.prepare(&selected?)
         })();
         match result {
             Ok(utterances) => {

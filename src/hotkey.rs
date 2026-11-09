@@ -11,7 +11,24 @@ pub enum HotkeyEvent {
     Cancel,
     /// Foreground window captured when Windows delivers the read shortcut.
     ReadAloud(isize),
+    /// Dictation's physical press, with the foreground window for selection-based routing.
+    ContextPressed(isize),
     ReadAloudUnavailable,
+}
+
+/// A press used for reading must never deliver its release to the dictation pipeline.
+#[derive(Default)]
+pub struct ContextGesture {
+    consumed: bool,
+}
+impl ContextGesture {
+    pub fn press(&mut self, consumed: bool) -> Option<HotkeyEvent> {
+        self.consumed = consumed;
+        (!consumed).then_some(HotkeyEvent::Pressed)
+    }
+    pub fn release(&mut self) -> Option<HotkeyEvent> {
+        (!std::mem::take(&mut self.consumed)).then_some(HotkeyEvent::Released)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,6 +267,17 @@ pub trait Hotkey: Send {
 mod tests {
     use super::*;
     use crate::config::EXAMPLE;
+
+    #[test]
+    fn reading_consumes_both_edges_but_does_not_change_the_next_dictation_hold() {
+        let mut gesture = ContextGesture::default();
+        assert_eq!(gesture.press(true), None);
+        assert_eq!(gesture.release(), None);
+        assert_eq!(gesture.press(false), Some(HotkeyEvent::Pressed));
+        assert_eq!(gesture.release(), Some(HotkeyEvent::Released));
+        assert_eq!(gesture.press(true), None);
+        assert_eq!(gesture.release(), None);
+    }
 
     #[test]
     fn every_accepted_key_name_is_documented_in_the_example() {

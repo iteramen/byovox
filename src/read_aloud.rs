@@ -40,7 +40,7 @@ impl Default for TtsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            hotkey: "ControlLeft+AltLeft+R".into(),
+            hotkey: String::new(),
             base_url: String::new(),
             model: "kokoro".into(),
             voice: "af_bella".into(),
@@ -65,14 +65,56 @@ pub struct Endpoint {
 }
 
 impl TtsConfig {
+    pub fn shared_hotkey(&self, dictation: &str) -> bool {
+        if self.hotkey.trim().is_empty() {
+            return true;
+        }
+        let (Ok(mut a), Ok(mut b)) = (
+            crate::hotkey::parse_chord(&self.hotkey),
+            crate::hotkey::parse_chord(dictation),
+        ) else {
+            return false;
+        };
+        a.modifiers.sort();
+        b.modifiers.sort();
+        a == b
+    }
     pub fn validate_hotkeys(&self, dictation: &str, cancel: &str) -> Result<(), String> {
-        if !self.enabled {
+        if !self.enabled || self.shared_hotkey(dictation) {
             return Ok(());
         }
         let read =
             crate::hotkey::parse_chord(&self.hotkey).map_err(|_| "tts.hotkey: invalid chord")?;
         let dictate =
             crate::hotkey::parse_chord(dictation).map_err(|_| "hotkey.key: invalid chord")?;
+        if matches!(
+            read.trigger.as_str(),
+            "ControlLeft"
+                | "ControlRight"
+                | "AltLeft"
+                | "AltRight"
+                | "ShiftLeft"
+                | "ShiftRight"
+                | "MetaLeft"
+                | "MetaRight"
+        ) {
+            return Err("tts.hotkey: use a non-modifier trigger key".into());
+        }
+        if read.modifiers.iter().any(|name| {
+            !matches!(
+                name.as_str(),
+                "ControlLeft"
+                    | "ControlRight"
+                    | "AltLeft"
+                    | "AltRight"
+                    | "ShiftLeft"
+                    | "ShiftRight"
+                    | "MetaLeft"
+                    | "MetaRight"
+            )
+        }) {
+            return Err("tts.hotkey: use Ctrl/Alt/Shift/Win modifiers with a trigger key".into());
+        }
         if read.trigger == cancel
             || read.modifiers.iter().any(|m| m == cancel)
             || read.trigger == dictate.trigger
@@ -90,39 +132,10 @@ impl TtsConfig {
         if !(1..=120).contains(&self.timeout_s) {
             return Err("tts.timeout_s: expected 1–120 seconds".into());
         }
+        if self.enabled && !self.hotkey.trim().is_empty() {
+            crate::hotkey::parse_chord(&self.hotkey).map_err(|_| "tts.hotkey: invalid chord")?;
+        }
         if self.enabled {
-            let chord = crate::hotkey::parse_chord(&self.hotkey)
-                .map_err(|_| "tts.hotkey: invalid chord")?;
-            if matches!(
-                chord.trigger.as_str(),
-                "ControlLeft"
-                    | "ControlRight"
-                    | "AltLeft"
-                    | "AltRight"
-                    | "ShiftLeft"
-                    | "ShiftRight"
-                    | "MetaLeft"
-                    | "MetaRight"
-            ) {
-                return Err("tts.hotkey: use a non-modifier trigger key".into());
-            }
-            if chord.modifiers.iter().any(|name| {
-                !matches!(
-                    name.as_str(),
-                    "ControlLeft"
-                        | "ControlRight"
-                        | "AltLeft"
-                        | "AltRight"
-                        | "ShiftLeft"
-                        | "ShiftRight"
-                        | "MetaLeft"
-                        | "MetaRight"
-                )
-            }) {
-                return Err(
-                    "tts.hotkey: use Ctrl/Alt/Shift/Win modifiers with a trigger key".into(),
-                );
-            }
             self.endpoint("en")?;
         }
         for (code, lane) in &self.by_language {
@@ -206,6 +219,23 @@ impl TtsConfig {
             })
             .collect()
     }
+}
+
+/// A document and its focused child may report the same selection. Different ranges refuse.
+pub fn unique_selection(
+    selections: impl IntoIterator<Item = Option<String>>,
+) -> Result<Option<String>, String> {
+    let mut result: Option<String> = None;
+    for text in selections.into_iter().flatten() {
+        if text.chars().count() > MAX_TEXT {
+            return Err("Read aloud: selection exceeds 20,000 characters".into());
+        }
+        if result.as_ref().is_some_and(|prior| prior != &text) {
+            return Err("Read aloud: multiple selections found; select one text range".into());
+        }
+        result = Some(text);
+    }
+    Ok(result)
 }
 
 /// Dominant supported script per chunk, not keyboard layout. Unknown dominant scripts are refused.
@@ -393,6 +423,38 @@ pub fn synthesize(
 mod tests {
     use super::*;
     use std::io::Write;
+    #[test]
+    fn document_selection_is_not_lost_when_the_focused_composer_has_only_a_caret() {
+        assert_eq!(
+            unique_selection([None, Some("Selected synthetic chat paragraph".into())]).unwrap(),
+            Some("Selected synthetic chat paragraph".into())
+        );
+        assert_eq!(unique_selection([None, None]).unwrap(), None);
+        assert_eq!(
+            unique_selection([Some("same".into()), Some("same".into())]).unwrap(),
+            Some("same".into())
+        );
+        assert!(unique_selection([Some("first".into()), Some("second".into())]).is_err());
+        assert!(unique_selection([Some("x".repeat(MAX_TEXT + 1))]).is_err());
+    }
+    #[test]
+    fn shared_dictation_shortcut_is_the_default_and_allows_legacy_bindings() {
+        let mut cfg = TtsConfig {
+            enabled: true,
+            base_url: "http://127.0.0.1/v1".into(),
+            ..Default::default()
+        };
+        for key in ["ControlRight", "ControlLeft+ShiftLeft+Z", "CapsLock+R"] {
+            assert!(cfg.shared_hotkey(key));
+            assert!(cfg.validate_hotkeys(key, "Escape").is_ok());
+        }
+        cfg.hotkey = "ShiftLeft+ControlLeft+Z".into();
+        assert!(cfg.shared_hotkey("ControlLeft+ShiftLeft+Z"));
+        assert!(
+            cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape")
+                .is_ok()
+        );
+    }
     fn server(
         status: u16,
         body: Vec<u8>,

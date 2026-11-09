@@ -1,6 +1,6 @@
 # Privacy policy — byovox
 
-**Effective: 2026-11-08 (read-aloud implementation draft).**
+**Effective: 2026-11-09 (read-aloud implementation draft).**
 
 byovox is a Windows push-to-talk dictation tool. You hold a hotkey, speak, release, and the
 transcript is typed into the window you were in. byovox runs no server of its own and has no
@@ -225,10 +225,15 @@ also welcome as [GitHub issues](https://github.com/iteramen/byovox/issues).
 
 ## Optional read aloud
 
-With `[tts].enabled = true`, the separate configurable hotkey reads one explicit selected text
-range from the foreground application using Windows UI Automation. It refuses password fields,
-empty/unsupported selections and a window changed since Windows delivered the shortcut; it never falls back to
-the clipboard or whole document (`platform::windows::inject::selected_text`). Only that text goes
+With `[tts].enabled = true`, the existing dictation shortcut reads explicitly selected text by
+default; a verified empty selection retains normal microphone dictation behavior. Another press
+stops reading, and its release never starts/stops dictation. A separate read-only shortcut remains
+optional. On the explicit gesture, Windows UI Automation checks the focused control and visible
+foreground document selection providers. It examines at most 200 nodes with a 1.5-second lookup
+budget (a platform call can additionally take its configured one-second timeout). GetText is used
+only for a non-degenerate selected range. Password fields, conflicting ranges, provider/limit errors
+or a changed window refuse the action without opening the microphone. It never falls back to the
+clipboard or document contents (`platform::windows::inject::selected_text_optional`). Only that text goes
 to your configured TTS endpoint, in chunks, with model, voice and speed (`read_aloud::synthesize`).
 The TTS server can retain it under its own policy. HTTPS verifies certificates; remote HTTP is
 possible and `byovox check` warns about it. Use a trusted encrypted connection for private text.

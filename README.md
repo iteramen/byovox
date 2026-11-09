@@ -228,17 +228,22 @@ Read aloud is off by default. Configure `[tts]` in your TOML (see
 ```toml
 [tts]
 enabled = true
-hotkey = "ControlLeft+AltLeft+R"
+hotkey = "" # share your existing dictation shortcut
 base_url = "http://<tailnet-host>:8770/v1"
 model = "kokoro"
 voice = "af_bella"
 ```
 
-Select a contiguous text range, then press the configured chord. Press it again, or Escape, to
-stop; starting dictation also stops reading. Use **left** Ctrl and **left** Alt for the example.
-Only the selected text goes to your TTS server. Nothing is copied, typed, recorded or saved.
-The application must expose its selection through Windows UI Automation TextPattern; an empty,
-password or unsupported selection is refused. A changed foreground window before selection is
+By default, use your existing dictation shortcut: with selected text it reads aloud; with no
+selection it dictates using your normal hold/toggle mode. Releasing a reading press does not
+stop playback. Another press or Escape stops reading. An explicit different `tts.hotkey` opts into
+a separate read-only shortcut, where an empty selection is refused.
+
+The focused control and visible foreground document selection providers are checked, so highlighting
+chat text can work even when the composer retains focus. Only explicit non-empty TextPattern
+ranges are read; no document/value/clipboard fallback is used. Passwords, ambiguous selections,
+provider errors and lookup limits refuse the contextual action without opening the microphone.
+Only chosen text goes to your TTS server. Reading copies, types, records and saves nothing. A changed foreground window before selection is
 read is refused. The server can retain requests under its own policy.
 
 English is the first target. Hebrew/Russian endpoint and voice slots are scaffolded but require

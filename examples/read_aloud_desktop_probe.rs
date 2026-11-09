@@ -252,7 +252,7 @@ mod probe {
                     }
                     HotkeyEvent::Cancel => worker.stop(),
                     HotkeyEvent::ReadAloudUnavailable => worker.unavailable(),
-                    HotkeyEvent::Pressed | HotkeyEvent::Toggle => {
+                    HotkeyEvent::ContextPressed(_) | HotkeyEvent::Pressed | HotkeyEvent::Toggle => {
                         other.fetch_add(1, Ordering::SeqCst);
                     }
                     HotkeyEvent::Released => {}

@@ -118,3 +118,21 @@ selection; Escape/Disable and dictation interruption; shortcut conflict/disabled
 mixed-language speech; elevated/custom applications; actual output-device loss. Hebrew/Russian
 voices/backends remain unconfigured and unqualified; unit tests cover routing and refusal without
 English fallback. The full daemon/release UI is not implied by the isolated fixture pass.
+
+## Contextual shortcut follow-up (2026-11-09)
+
+Owner smoke test of the installed PR build exposed a chat selection miss: focused-composer-only
+lookup reported Select text first despite highlighted message text. The owner ruled that the
+default shortcut should select read/dictate behavior from selection state. Lookup now also checks
+foreground document providers without reading unselected content. Unit cases cover an empty
+focused composer plus a selected document, duplicate/conflicting ranges, limits and consuming
+a reading press's release before a later ordinary dictation hold. Same-chord and bare-modifier
+configuration are covered; the optional separate binding remains tested separately.
+
+The reported dictation attempts reached capture but were discarded as silence, including one
+prior to the PR installation. Device metadata identified the configured generic Microphone as
+Microphone (tranScreen Audio). The owner selected Microphone Array (Synaptics Audio) instead.
+This is an input selection correction, not a reason to bypass the silence gate. Device enumeration
+uses `audio_input_probe` without opening a recording stream. Actual shared-shortcut chat read,
+empty-selection microphone dictation and output insertion need an owner-operated smoke check of
+the newly installed build; unit/CI success alone does not close that acceptance.
