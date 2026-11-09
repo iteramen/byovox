@@ -354,6 +354,13 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
     }
 }
 
+fn missing_text_pattern(code: windows::core::HRESULT) -> bool {
+    code.is_ok()
+        || code == E_NOINTERFACE
+        || code == E_POINTER
+        || code.0 as u32 == UIA_E_NOTSUPPORTED
+}
+
 /// Outer None: no TextPattern provider; inner None: verified empty/caret selection.
 unsafe fn explicit_selection(
     element: &IUIAutomationElement,
@@ -362,11 +369,7 @@ unsafe fn explicit_selection(
         let pattern =
             match element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
                 Ok(pattern) => pattern,
-                Err(error)
-                    if error.code() == E_NOINTERFACE
-                        || error.code() == E_POINTER
-                        || error.code().0 as u32 == UIA_E_NOTSUPPORTED =>
-                {
+                Err(error) if missing_text_pattern(error.code()) => {
                     return Ok(None);
                 }
                 Err(error) => {
@@ -578,6 +581,21 @@ impl Target for WinTarget {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn successful_null_pattern_is_absence_not_a_selection_failure() {
+        // UIA returns S_OK plus null for an unsupported pattern. windows-rs reports
+        // that null interface as Error::empty(), whose HRESULT is still S_OK.
+        assert!(super::missing_text_pattern(windows::core::HRESULT(0)));
+        assert!(super::missing_text_pattern(
+            windows::Win32::Foundation::E_NOINTERFACE
+        ));
+        assert!(!super::missing_text_pattern(
+            windows::Win32::Foundation::E_ACCESSDENIED
+        ));
+        assert!(!super::missing_text_pattern(windows::core::HRESULT(
+            0x80040201u32 as i32
+        )));
+    }
     use super::*;
     use windows::Win32::UI::Accessibility::TreeScope_Descendants;
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowTextW};

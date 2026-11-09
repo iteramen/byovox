@@ -148,3 +148,12 @@ monitor's physical work area (excluding taskbars/app bars), flips above/left as 
 inside that area, and repositions after DPI/size changes. Geometry tests cover all four taskbar
 sides, edges, negative monitor origins and a scaled pill. Actual placement and contextual
 read/dictate behavior still need the owner-operated check on the installed follow-up.
+
+The next owner retry confirmed dictation in the chat client after the physical-input correction,
+but reading still failed and WhatsApp contextual dictation was blocked. The numeric error was
+HRESULT S_OK (0): UIA's normal successful null-pattern result is represented by windows-rs as
+Error::empty(). Treating it as a failed provider was incorrect. A regression test first failed
+for S_OK, then passed after normalizing successful-null/unsupported results to provider absence;
+access-denied and unavailable-element errors still fail closed. The owner reported the updated
+pill visible near the cursor, offset right/above. Reading and WhatsApp require a fresh native check
+of the null-pattern fix; these failed owner attempts are not accepted as passing evidence.
