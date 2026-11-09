@@ -49,4 +49,4 @@ jobs:
       # actions/setup-*, add `with: { setup-python: false }` below and the gate runs against the
       # runner's own python3.
       - name: Docs-freshness gate (deterministic)
-        uses: iteramen/ouro/actions/docs-freshness@v1.11.0
+        uses: iteramen/ouro/actions/docs-freshness@v1.11.1
