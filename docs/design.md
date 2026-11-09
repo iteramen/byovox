@@ -262,7 +262,7 @@ An explicit different `tts.hotkey` enables the optional native RegisterHotKey re
 `selected_text_optional` checks the focused element and foreground document providers, addressing
 chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
 text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
-selections. Traversal is limited to 200 nodes and a 1.5-second budget, plus at most the current
+selections. A filtered UIA document snapshot returns at most 32 providers within a 1.5-second budget, plus at most the current
 platform call's one-second timeout. A supported document provider owns its content; message nodes
 are not traversed. Passwords, errors, limits or a window change refuse without a microphone fallback.
 There is no clipboard, value or whole-document fallback.

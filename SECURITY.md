@@ -143,8 +143,7 @@ retains the existing recording behavior. Reader presses consume their release. U
 ambiguous, password, provider-error or over-budget selection state refuses without a microphone
 fallback. An optional different TTS chord retains the dedicated registration behavior above.
 
-Lookup inspects the focused control and visible foreground document providers, bounded to 200
-nodes and a 1.5-second budget plus at most an in-progress platform call's one-second timeout.
+Lookup inspects the focused control and visible foreground document providers, bounded to 32 returned document providers and a 1.5-second budget plus at most an in-progress platform call's one-second timeout.
 It never asks for an element name/value or document text. GetText is called only after selected
 range endpoints prove the range non-degenerate. Equal parent/child selections are deduplicated;
 different selected text is refused. Document providers are authoritative and their message/content

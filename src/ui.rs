@@ -720,7 +720,12 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::RedrawRequested => pill.draw(),
             // Text is laid out in physical pixels; a DPI change must repaint.
-            WindowEvent::ScaleFactorChanged { .. } => pill.window.request_redraw(),
+            WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Resized(_) => {
+                if pill.text.is_some() {
+                    pill.position();
+                }
+                pill.window.request_redraw();
+            }
             _ => {}
         }
     }
@@ -881,10 +886,7 @@ impl Pill {
         self.text = text;
         match text {
             Some(_) => {
-                if let Some((x, y)) = cursor_position() {
-                    self.window
-                        .set_outer_position(winit::dpi::PhysicalPosition::new(x + 24, y + 24));
-                }
+                self.position();
                 self.window.set_visible(true);
                 self.window.request_redraw();
             }
@@ -893,6 +895,18 @@ impl Pill {
         // winit recomputes the ex-style on every visibility change, erasing this bit; re-assert it (set_visible runs inline, so after the wipe).
         if let Err(e) = deny_activation(&self.window) {
             tracing::warn!(error = %e, "pill lost its no-activation style");
+        }
+    }
+
+    fn position(&self) {
+        if let Some(cursor) = cursor_position() {
+            let size = self.window.outer_size();
+            let offset = (24.0 * self.window.scale_factor()).round() as i32;
+            let origin = monitor_work_area(cursor)
+                .map(|work| pill_origin(cursor, (size.width, size.height), work, offset))
+                .unwrap_or((cursor.0 + offset, cursor.1 - size.height as i32 - offset));
+            self.window
+                .set_outer_position(winit::dpi::PhysicalPosition::new(origin.0, origin.1));
         }
     }
 
@@ -934,6 +948,69 @@ impl Pill {
         }
         let _ = buf.present();
     }
+}
+
+/// Physical work-area coordinates exclude taskbars/app bars, including negative-origin monitors.
+fn pill_origin(
+    cursor: (i32, i32),
+    size: (u32, u32),
+    work: (i32, i32, i32, i32),
+    offset: i32,
+) -> (i32, i32) {
+    fn axis(cursor: i32, size: u32, low: i32, high: i32, offset: i32) -> i32 {
+        let (cursor, size, low, high, offset) = (
+            i64::from(cursor),
+            i64::from(size),
+            i64::from(low),
+            i64::from(high),
+            i64::from(offset),
+        );
+        let margin = 8.min(((high - low - size).max(0)) / 2);
+        let min = low + margin;
+        let max = (high - size - margin).max(min);
+        let preferred = if cursor + offset + size > high - margin {
+            cursor - size - offset
+        } else {
+            cursor + offset
+        };
+        preferred.clamp(min, max) as i32
+    }
+    (
+        axis(cursor.0, size.0, work.0, work.2, offset),
+        axis(cursor.1, size.1, work.1, work.3, offset),
+    )
+}
+
+#[cfg(windows)]
+fn monitor_work_area(cursor: (i32, i32)) -> Option<(i32, i32, i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: a plain monitor query; info has the API's required size and lifetime.
+    unsafe {
+        let monitor = MonitorFromPoint(
+            POINT {
+                x: cursor.0,
+                y: cursor.1,
+            },
+            MONITOR_DEFAULTTONEAREST,
+        );
+        GetMonitorInfoW(monitor, &mut info).as_bool().then_some((
+            info.rcWork.left,
+            info.rcWork.top,
+            info.rcWork.right,
+            info.rcWork.bottom,
+        ))
+    }
+}
+#[cfg(not(windows))]
+fn monitor_work_area(_: (i32, i32)) -> Option<(i32, i32, i32, i32)> {
+    None
 }
 
 /// Keep the pill out of the activation chain, taskbar and Alt-Tab. Re-assert after every `set_visible`; re-check on a winit bump.
@@ -1140,6 +1217,21 @@ fn open_path(p: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pill_stays_inside_work_area_at_taskbars_edges_and_scaled_negative_monitors() {
+        for (cursor, size, work, offset) in [
+            ((1910, 1070), (180, 36), (0, 0, 1920, 1040), 24),
+            ((5, 500), (180, 36), (60, 0, 1920, 1080), 24),
+            ((20, 2), (180, 36), (0, 60, 1920, 1080), 24),
+            ((1900, 500), (180, 36), (0, 0, 1860, 1080), 24),
+            ((-5, -5), (360, 72), (-1920, -1080, 0, -40), 48),
+        ] {
+            let (x, y) = super::pill_origin(cursor, size, work, offset);
+            assert!(x >= work.0 && y >= work.1);
+            assert!(i64::from(x) + i64::from(size.0) <= i64::from(work.2));
+            assert!(i64::from(y) + i64::from(size.1) <= i64::from(work.3));
+        }
+    }
     use super::*;
 
     #[test]

@@ -136,3 +136,15 @@ This is an input selection correction, not a reason to bypass the silence gate. 
 uses `audio_input_probe` without opening a recording stream. Actual shared-shortcut chat read,
 empty-selection microphone dictation and output insertion need an owner-operated smoke check of
 the newly installed build; unit/CI success alone does not close that acceptance.
+
+The first contextual owner retry still refused both actions on a provider lookup error. That
+version remains a failed smoke result, not an accepted fix. The follow-up replaces walking
+unrelated UI controls with one filtered snapshot of document providers (at most 32 returned)
+and retains bounded lookups and fixed/numeric-only errors. Dictation was temporarily restored
+without the contextual lookup while this repair was prepared.
+
+The owner also reported the failed pill below the taskbar. Placement now uses the cursor
+monitor's physical work area (excluding taskbars/app bars), flips above/left as needed, clamps
+inside that area, and repositions after DPI/size changes. Geometry tests cover all four taskbar
+sides, edges, negative monitor origins and a scaled pill. Actual placement and contextual
+read/dictate behavior still need the owner-operated check on the installed follow-up.

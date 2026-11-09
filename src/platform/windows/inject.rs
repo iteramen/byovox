@@ -4,10 +4,12 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{E_NOINTERFACE, E_POINTER, HWND};
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern,
     IUIAutomationValuePattern, TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
-    UIA_DocumentControlTypeId, UIA_E_NOTSUPPORTED, UIA_TextPatternId, UIA_ValuePatternId,
+    TreeScope_Subtree, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId, UIA_E_NOTSUPPORTED,
+    UIA_TextPatternId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -264,9 +266,12 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
             return Err("Read aloud: the selected window changed; select again".into());
         }
         let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
-        let focused = uia
-            .GetFocusedElement()
-            .map_err(|_| "Read aloud: cannot inspect selection")?;
+        let focused = uia.GetFocusedElement().map_err(|error| {
+            format!(
+                "Read aloud: selected range unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })?;
         if focused
             .CurrentIsPassword()
             .map_err(|_| "Read aloud: cannot verify text field")?
@@ -286,56 +291,57 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
         let root = uia
             .ElementFromHandle(foreground)
             .map_err(|_| "Read aloud: cannot inspect selected window")?;
-        let walker = uia
-            .ControlViewWalker()
-            .map_err(|_| "Read aloud: Windows text access unavailable")?;
-        let mut pending = vec![root];
-        let mut visited = 0;
-        while let Some(element) = pending.pop() {
-            visited += 1;
-            if visited > 200 || Instant::now() >= deadline {
+        // Ask UIA for document providers in one filtered snapshot. Walking unrelated toolbar
+        // leaves can encounter disappearing controls and incorrectly block both actions.
+        let condition = uia
+            .CreatePropertyCondition(
+                UIA_ControlTypePropertyId,
+                &VARIANT::from(UIA_DocumentControlTypeId.0),
+            )
+            .map_err(|error| {
+                format!(
+                    "Read aloud: document selection filter unavailable (0x{:08X})",
+                    error.code().0 as u32
+                )
+            })?;
+        let documents = root
+            .FindAll(TreeScope_Subtree, &condition)
+            .map_err(|error| {
+                format!(
+                    "Read aloud: document selection lookup unavailable (0x{:08X})",
+                    error.code().0 as u32
+                )
+            })?;
+        let count = documents
+            .Length()
+            .map_err(|_| "Read aloud: cannot inspect document selections")?;
+        if count > 32 {
+            return Err("Read aloud: too many document selection providers".into());
+        }
+        for index in 0..count {
+            if Instant::now() >= deadline {
                 return Err("Read aloud: selection lookup exceeded its limit; select again".into());
             }
+            let element = documents
+                .GetElement(index)
+                .map_err(|_| "Read aloud: selected document became unavailable")?;
             if element
                 .CurrentIsOffscreen()
-                .map_err(|_| "Read aloud: cannot verify selected window")?
+                .map_err(|_| "Read aloud: cannot verify selected document")?
                 .as_bool()
             {
                 continue;
             }
-            // Inspect only document selection providers, not names/values or individual chat messages.
             if element
-                .CurrentControlType()
-                .map_err(|_| "Read aloud: cannot verify selected window")?
-                == UIA_DocumentControlTypeId
-                && !element
-                    .CurrentIsOffscreen()
-                    .map_err(|_| "Read aloud: cannot verify selected document")?
-                    .as_bool()
+                .CurrentIsPassword()
+                .map_err(|_| "Read aloud: cannot verify selected document")?
+                .as_bool()
             {
-                if element
-                    .CurrentIsPassword()
-                    .map_err(|_| "Read aloud: cannot verify selected document")?
-                    .as_bool()
-                {
-                    return Err("Read aloud: password fields are excluded".into());
-                }
-                if let Some(text) = explicit_selection(&element)? {
-                    supported = true;
-                    selections.push(text);
-                    // A document's selection provider is authoritative for its own content.
-                    continue;
-                }
+                return Err("Read aloud: password fields are excluded".into());
             }
-            let mut child = optional_selection_element(walker.GetFirstChildElement(&element))?;
-            while let Some(next) = child {
-                if pending.len() + visited >= 200 || Instant::now() >= deadline {
-                    return Err(
-                        "Read aloud: selection lookup exceeded its limit; select again".into(),
-                    );
-                }
-                child = optional_selection_element(walker.GetNextSiblingElement(&next))?;
-                pending.push(next);
+            if let Some(text) = explicit_selection(&element)? {
+                supported = true;
+                selections.push(text);
             }
         }
         if foreground != GetForegroundWindow() {
@@ -345,16 +351,6 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
             return Err("Read aloud: this application does not expose selection state".into());
         }
         crate::read_aloud::unique_selection(selections)
-    }
-}
-
-fn optional_selection_element(
-    result: windows::core::Result<IUIAutomationElement>,
-) -> Result<Option<IUIAutomationElement>, String> {
-    match result {
-        Ok(element) => Ok(Some(element)),
-        Err(error) if error.code() == E_POINTER => Ok(None), // UIA's null child/sibling.
-        Err(_) => Err("Read aloud: selection provider became unavailable; select again".into()),
     }
 }
 
@@ -373,27 +369,37 @@ unsafe fn explicit_selection(
                 {
                     return Ok(None);
                 }
-                Err(_) => {
-                    return Err(
-                        "Read aloud: selection provider became unavailable; select again".into(),
-                    );
+                Err(error) => {
+                    return Err(format!(
+                        "Read aloud: selection pattern unavailable (0x{:08X})",
+                        error.code().0 as u32
+                    ));
                 }
             };
-        let ranges = pattern
-            .GetSelection()
-            .map_err(|_| "Read aloud: cannot inspect selection")?;
-        let count = ranges
-            .Length()
-            .map_err(|_| "Read aloud: cannot inspect selection")?;
+        let ranges = pattern.GetSelection().map_err(|error| {
+            format!(
+                "Read aloud: selected range unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })?;
+        let count = ranges.Length().map_err(|error| {
+            format!(
+                "Read aloud: selected range unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })?;
         if count == 0 {
             return Ok(Some(None));
         }
         if count != 1 {
             return Err("Read aloud: select one contiguous text range".into());
         }
-        let range = ranges
-            .GetElement(0)
-            .map_err(|_| "Read aloud: cannot inspect selection")?;
+        let range = ranges.GetElement(0).map_err(|error| {
+            format!(
+                "Read aloud: selected range unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })?;
         if range
             .CompareEndpoints(
                 TextPatternRangeEndpoint_Start,

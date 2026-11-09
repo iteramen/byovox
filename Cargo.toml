@@ -63,12 +63,14 @@ windows = { version = "0.62", features = [
   "Win32_UI_Shell",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_System_Com",
+  "Win32_System_Ole",
+  "Win32_System_Variant",
   "Win32_System_Console",
   "Win32_System_Threading",
   "Win32_System_JobObjects",
   # needed by CreateJobObjectW
   "Win32_Security",
 ] }
-# `windows::core::implement` expands to `::windows_core::…`, which must be a direct dependency.
+# `windows::core::implement` expands to `::windows_core::â€¦`, which must be a direct dependency.
 windows-core = "0.62"
 winreg = "0.55"
