@@ -7,9 +7,10 @@ use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern,
-    IUIAutomationValuePattern, TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
-    TreeScope_Subtree, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId, UIA_E_NOTSUPPORTED,
-    UIA_TextPatternId, UIA_ValuePatternId,
+    IUIAutomationValuePattern, SupportedTextSelection_None, TextPatternRangeEndpoint_End,
+    TextPatternRangeEndpoint_Start, TreeScope_Subtree, UIA_ControlTypePropertyId,
+    UIA_DocumentControlTypeId, UIA_E_NOTSUPPORTED, UIA_IsOffscreenPropertyId, UIA_TextPatternId,
+    UIA_ValuePatternId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -304,6 +305,12 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
                     error.code().0 as u32
                 )
             })?;
+        let visible = uia
+            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, &VARIANT::from(false))
+            .map_err(|_| "Read aloud: visible document filter unavailable")?;
+        let condition = uia
+            .CreateAndCondition(&condition, &visible)
+            .map_err(|_| "Read aloud: visible document filter unavailable")?;
         let documents = root
             .FindAll(TreeScope_Subtree, &condition)
             .map_err(|error| {
@@ -315,8 +322,10 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
         let count = documents
             .Length()
             .map_err(|_| "Read aloud: cannot inspect document selections")?;
-        if count > 32 {
-            return Err("Read aloud: too many document selection providers".into());
+        if count > 128 {
+            return Err(format!(
+                "Read aloud: too many visible document selection providers ({count})"
+            ));
         }
         for index in 0..count {
             if Instant::now() >= deadline {
@@ -361,6 +370,17 @@ fn missing_text_pattern(code: windows::core::HRESULT) -> bool {
         || code.0 as u32 == UIA_E_NOTSUPPORTED
 }
 
+fn optional_selection_ranges<T>(result: windows::core::Result<T>) -> Result<Option<T>, String> {
+    match result {
+        Ok(ranges) => Ok(Some(ranges)),
+        Err(error) if error.code().is_ok() => Ok(None),
+        Err(error) => Err(format!(
+            "Read aloud: selected range unavailable (0x{:08X})",
+            error.code().0 as u32
+        )),
+    }
+}
+
 /// Outer None: no TextPattern provider; inner None: verified empty/caret selection.
 unsafe fn explicit_selection(
     element: &IUIAutomationElement,
@@ -379,12 +399,18 @@ unsafe fn explicit_selection(
                     ));
                 }
             };
-        let ranges = pattern.GetSelection().map_err(|error| {
+        if pattern.SupportedTextSelection().map_err(|error| {
             format!(
-                "Read aloud: selected range unavailable (0x{:08X})",
+                "Read aloud: selection capability unavailable (0x{:08X})",
                 error.code().0 as u32
             )
-        })?;
+        })? == SupportedTextSelection_None
+        {
+            return Ok(Some(None));
+        }
+        let Some(ranges) = optional_selection_ranges(pattern.GetSelection())? else {
+            return Ok(Some(None));
+        };
         let count = ranges.Length().map_err(|error| {
             format!(
                 "Read aloud: selected range unavailable (0x{:08X})",
@@ -581,6 +607,20 @@ impl Target for WinTarget {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn successful_null_selection_array_means_no_selected_range() {
+        let null = Err::<(), _>(windows::core::Error::from_hresult(windows::core::HRESULT(
+            0,
+        )));
+        assert!(super::optional_selection_ranges(null).unwrap().is_none());
+        assert!(
+            super::optional_selection_ranges(Err::<(), _>(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_ACCESSDENIED
+            )))
+            .is_err()
+        );
+    }
+
     #[test]
     fn successful_null_pattern_is_absence_not_a_selection_failure() {
         // UIA returns S_OK plus null for an unsupported pattern. windows-rs reports

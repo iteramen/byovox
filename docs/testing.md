@@ -157,3 +157,17 @@ for S_OK, then passed after normalizing successful-null/unsupported results to p
 access-denied and unavailable-element errors still fail closed. The owner reported the updated
 pill visible near the cursor, offset right/above. Reading and WhatsApp require a fresh native check
 of the null-pattern fix; these failed owner attempts are not accepted as passing evidence.
+
+The subsequent owner retry still failed reading and WhatsApp dictation; status identified the
+document-count guard, which had been applied before off-screen providers were excluded. The
+server-side UIA condition now combines Document control type with IsOffscreen=false before
+applying the 32-provider limit. The Windows contract also permits GetSelection to return a
+successful null array when there is no selected range/insertion point; that is normalized to
+no selection, not a provider error. Its regression test was run red then green. See the
+[Microsoft GetSelection contract](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationtextpattern-getselection).
+Native reading/WhatsApp acceptance remains pending; ordinary dictation was restored separately
+while these repairs were built.
+
+The active bound is 128 returned visible document providers (with the same time budget), rather
+than limiting total documents in a long conversation to 32 before checking visibility. No text is
+read while filtering providers; only explicit selected ranges are fetched afterwards.
