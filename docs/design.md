@@ -281,3 +281,12 @@ POST `/audio/speech` requests non-streaming PCM16 WAV with model, voice, input a
 finite WAV lengths and Kokoro's RIFF/data streaming sentinels are accepted from a bounded body.
 Other malformed chunks, unsupported rates/channels/formats or >120 seconds per chunk are refused.
 HE/RU scaffolding does not imply configured or qualified HE/RU backends.
+
+### Incomplete cleanup responses
+
+A nonempty cleanup reply is rejected when its first choice explicitly reports a
+finish_reason other than the string stop, including length, filtering, tool calls,
+null or malformed values. Existing failure handling retains the complete raw transcript
+and reports cleanup failure. Servers omitting finish_reason remain compatible; the client
+cannot detect truncation that a server does not report. The failure message contains no
+response text. The output token limit and prompt are unchanged.

@@ -159,6 +159,13 @@ impl Polisher for PolishClient {
         }
         let v: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| format!("polish JSON: {e}"))?;
+        // Older compatible servers may omit this field. An explicit incomplete or malformed
+        // reason must not replace the full raw transcript with partial output.
+        if let Some(reason) = v["choices"][0].get("finish_reason")
+            && reason.as_str() != Some("stop")
+        {
+            return Err("polish returned incomplete content".into());
+        }
         // Absent-or-not-a-string and blank are different failures.
         let content = v["choices"][0]["message"]["content"]
             .as_str()
@@ -185,6 +192,41 @@ mod tests {
     use super::*;
     use crate::testutil::{MockServer, auth_header};
     use std::time::Duration;
+
+    #[test]
+    fn incomplete_completions_are_errors_without_response_content() {
+        for reason in [
+            serde_json::json!("length"),
+            serde_json::json!("content_filter"),
+            serde_json::json!("tool_calls"),
+            serde_json::json!("unknown"),
+            serde_json::Value::Null,
+            serde_json::json!(42),
+        ] {
+            let body = serde_json::json!({"choices": [{"finish_reason": reason,
+                "message": {"content": "partial secret text"}}]})
+            .to_string();
+            let server = MockServer::start(200, &body);
+            assert_eq!(
+                client(server.url())
+                    .polish("complete raw transcript")
+                    .unwrap_err(),
+                "polish returned incomplete content"
+            );
+        }
+    }
+
+    #[test]
+    fn normally_stopped_completion_is_accepted() {
+        let server = MockServer::start(
+            200,
+            r#"{"choices":[{"finish_reason":"stop","message":{"content":"Complete text."}}]}"#,
+        );
+        assert_eq!(
+            client(server.url()).polish("raw").unwrap(),
+            "Complete text."
+        );
+    }
 
     #[test]
     fn a_first_word_i_gets_its_capital_back() {
