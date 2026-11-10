@@ -15,6 +15,7 @@ pub const MAX_AUDIO: usize = 12 * 1024 * 1024;
 pub struct TtsConfig {
     pub enabled: bool,
     pub hotkey: String,
+    pub copy_fallback: bool,
     pub base_url: String,
     pub model: String,
     pub voice: String,
@@ -41,6 +42,7 @@ impl Default for TtsConfig {
         Self {
             enabled: false,
             hotkey: "ControlLeft+AltLeft+R".into(),
+            copy_fallback: true,
             base_url: String::new(),
             model: "kokoro".into(),
             voice: "af_bella".into(),
@@ -415,6 +417,23 @@ pub fn synthesize(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn narration_copy_fallback_is_default_and_can_be_disabled() {
+        let defaults = serde_json::to_value(super::TtsConfig::default()).unwrap();
+        assert_eq!(
+            defaults.get("copy_fallback"),
+            Some(&serde_json::Value::Bool(true))
+        );
+        let legacy: super::TtsConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(serde_json::to_value(legacy).unwrap()["copy_fallback"], true);
+        let opted_out: super::TtsConfig =
+            serde_json::from_str(r#"{"copy_fallback":false}"#).unwrap();
+        assert_eq!(
+            serde_json::to_value(opted_out).unwrap()["copy_fallback"],
+            false
+        );
+    }
+
     use super::*;
     use std::io::Write;
     #[test]

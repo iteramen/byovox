@@ -215,3 +215,34 @@ This aligns the selection worker with [Microsoft threading guidance](https://lea
 It is a candidate repair for the observed provider failure, not proof that either target app now
 works. After installing, select synthetic text in Notepad and press Ctrl+Alt+R; verify speech and
 second-press Stop, then check the chat selection separately. Keep Ctrl+Shift+Z dictation separate.
+
+
+## Everyday-app narration coverage (#42)
+
+Owner confirmed Windows Notepad speech and second-press Stop on b8e6bac. Earlier failures in the
+running editor were Notepad++/Scintilla, not proof of a Windows Notepad failure. Chat selection
+remains unresolved. The owner rejected Notepad-only acceptance and approved guarded Copy fallback
+by default, with a UIA-only opt-out and documented clipboard-history tradeoff.
+
+Regression ad27ca7 failed before the default/opt-out field existed. Automated cases cover legacy
+configuration defaults, opt-out, stale/foreign/ownerless sequence refusal, restoration race guards,
+clipboard handle format refusal, malformed/empty/oversized UTF-16. A native child-process test
+creates a private noninteractive window station/desktop and verifies plain text + HTML + RTF
+restoration, empty-clipboard restoration, and refusal to overwrite a newer same-owner update.
+It never reads or changes the interactive clipboard. The source fixture closes its write before
+sampling the sequence, because Windows publishes synthesized formats on CloseClipboard.
+These tests do not prove app support.
+
+Native checklist (synthetic text only, do not use ordinary chats/documents):
+- [ ] Windows Notepad: UIA speech, Stop, no-selection refusal; existing dictation regression.
+- [ ] Notepad++: selected-text speech via Copy, Stop, empty-selection refusal (no current-line read).
+- [ ] Actual chat client: highlighted synthetic sentence, speech, Stop, empty-selection behavior.
+- [ ] WhatsApp prepared test conversation: selected synthetic text, no composer insertion/submission.
+- [ ] Browser and an available Office editor: selected text; preserve formatted clipboard content.
+- [ ] Prior plain/HTML clipboard content restored; newer clipboard update retained and narration refused.
+- [ ] Unsupported clipboard snapshot refuses before Copy; timeout/clipboard lock gives a clear error.
+- [ ] Cancel/source switch during Copy: no TTS, restore only that operation's still-current result.
+- [ ] Password fields and known terminal windows refuse Copy; UIA errors do not fall through.
+- [ ] copy_fallback=false restores UIA-only behavior. No selected text/clipboard payload in logs.
+
+No numerical coverage claim or feature acceptance until these real-app results are recorded.

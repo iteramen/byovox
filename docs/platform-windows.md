@@ -415,7 +415,8 @@ queued work; generation and pipeline-state checks reject late or busy results.
 
 The native RegisterHotKey binding uses no repeat, checks configured modifier sides,
 reports conflicts, releases on Disable and reacquires on Enable. Reading uses the default
-Windows output. Explicit UIA selected ranges are the only text source; unsupported providers
+Windows output. Explicit UIA ranges are preferred; missing ranges can use guarded Copy by default.
+Set tts.copy_fallback=false for UIA-only operation; unsupported providers with Copy disabled
 report numeric control-role/provider-count metadata, never text, names or window titles.
 
 
@@ -427,3 +428,11 @@ interface is moved to another thread. An existing STA is refused rather than sil
 Only the client connection persists: selected ranges, elements and text remain request-local.
 There are no accessibility event subscriptions or background document scans. Audio COM setup
 and dictation selection/target behavior are unchanged.
+
+
+Copy fallback is Windows-only and independent of dictation. It preserves supported clipboard
+formats in RAM, rejects stale/foreign contents, checks foreground/focus and cancellation, and
+restores only its own unchanged Copy result. Scintilla editors must expose a nonempty numeric
+selection state; known terminal window classes refuse. Other applications define their Copy
+behavior. Clipboard history/managers/sync can observe the temporary data. Detailed boundaries
+and opt-out are in SECURITY.md and privacy.md; qualification is per application, not universal.

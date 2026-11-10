@@ -312,8 +312,9 @@ pub fn run(cfg: &Config, config_path: &Path) -> bool {
                 "read-aloud",
                 None,
                 &format!(
-                    "{}; configured (selection/playback not tested); he={}, ru={}",
+                    "{}; copy_fallback={}; configured (selection/playback not tested); he={}, ru={}",
                     cfg.tts.effective_hotkey(),
+                    cfg.tts.copy_fallback,
                     if cfg
                         .tts
                         .by_language

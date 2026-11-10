@@ -233,8 +233,9 @@ Windows UI Automation checks the focused control and visible
 foreground text-selection providers. It uses a filtered UIA TextPattern-provider snapshot with at most 128 returned visible TextPattern providers and a 1.5-second budget checked between providers
 (each platform call has a one-second timeout; this is not a hard total-time bound). GetText is used
 only for a non-degenerate selected range. Password fields, conflicting ranges, provider/limit errors
-or a changed window refuse the action without opening the microphone. It never falls back to the
-clipboard or document contents (`platform::windows::inject::selected_text_optional`). Only that text goes
+or a changed window refuse the action without opening the microphone. It never reads document contents as a fallback. When UIA supplies no selection, default-on
+`tts.copy_fallback` uses the app's Copy command under the guards below. The selected range or
+app-provided Copy result goes
 to your configured TTS endpoint, in chunks, with model, voice and speed (`read_aloud::synthesize`).
 The TTS server can retain it under its own policy. HTTPS verifies certificates; remote HTTP is
 possible and `byovox check` warns about it. Use a trusted encrypted connection for private text.
@@ -242,7 +243,8 @@ possible and `byovox check` warns about it. Use a trusted encrypted connection f
 TTS credentials are separate from STT/cleanup. A language lane receives only its own configured
 token unless `inherit_token = true` explicitly selects the default TTS credential. Requests follow
 no redirects. Selected text, generated audio and server response bodies are never written to logs,
-files, the clipboard, capture history or `byovox last`, even at debug level. Only fixed status and
+files, capture history or `byovox last`, even at debug level. Copy fallback temporarily exposes
+text on the clipboard; generated audio is never placed there. Only fixed status and
 failure messages are shown. The TOML retains non-secret TTS configuration and token references.
 
 The shortcut toggles reading; Escape, Disable or starting dictation cancels it. Audio stops and
@@ -260,3 +262,20 @@ interface is moved to another thread. An existing STA is refused rather than sil
 Only the client connection persists: selected ranges, elements and text remain request-local.
 There are no accessibility event subscriptions or background document scans. Audio COM setup
 and dictation selection/target behavior are unchanged.
+
+
+### Clipboard use for narration
+
+The owner chose broad app compatibility with guarded Copy fallback enabled by default. Set
+`[tts].copy_fallback = false` to keep accessibility-only narration. When used, Copy temporarily
+puts the source app's selected/copied text on the shared Windows clipboard. Clipboard managers,
+history and cloud synchronization can retain it; restoring the previous clipboard cannot undo
+that. The original clipboard snapshot is held only in RAM, bounded to 64 supported formats/8 MiB.
+Unsupported clipboard formats refuse before Copy. Newer clipboard updates are never overwritten.
+
+This path never cuts, pastes or selects all. It rejects stale/foreign copies, password controls,
+known terminals and source changes. Scintilla/Notepad++ empty selections are checked explicitly.
+Other apps can define Copy as current-line copying when nothing is selected: select the intended
+text before invoking narration. Cancellation prevents TTS but still attempts to restore any Copy
+result already produced. Timeout/restore failure can leave copied text on the clipboard and is
+reported; clipboard content is never logged or saved in byovox history. See SECURITY.md for limits.

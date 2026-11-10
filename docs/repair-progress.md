@@ -82,3 +82,16 @@ borrowed audio STA; a dedicated persistent MTA client replaces it without changi
 Code/CI proof and real-app selection acceptance remain separate checkpoints.
 
 Local validation: fmt, clippy, 463 library + 5 CLI tests passed (18 ignored); benchmark self-test passed. Three native COM lifecycle tests pass. Native app acceptance remains pending.
+
+
+### Owner reprioritization: everyday-app coverage (#42)
+
+b8e6bac passed Windows Notepad narration and second-press Stop. Notepad++ and the chat client
+still need coverage. Owner requires practical cross-app use and approved guarded Copy fallback
+by default, ahead of further Android work. Keep separate shortcuts and the Synaptics array.
+The default/opt-out regression failed before implementation (ad27ca7). Clipboard privacy/security
+contract is updated with restoration, stale-data guards, source-defined Copy behavior and limits.
+Native coverage remains pending; parent #33 remains draft. Android main fixes were synchronized
+into its narration branch (0ec9d0d), but item 4 implementation has not started.
+
+Copy candidate local validation: fmt/clippy, 469 library + 5 CLI tests passed (18 ignored), benchmark self-test passed. Native private-station clipboard round-trip/race tests passed without touching the interactive clipboard. Application-level Copy acceptance is still pending.
