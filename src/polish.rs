@@ -159,6 +159,13 @@ impl Polisher for PolishClient {
         }
         let v: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| format!("polish JSON: {e}"))?;
+        // Older compatible servers may omit this field. An explicit incomplete or malformed
+        // reason must not replace the full raw transcript with partial output.
+        if let Some(reason) = v["choices"][0].get("finish_reason")
+            && reason.as_str() != Some("stop")
+        {
+            return Err("polish returned incomplete content".into());
+        }
         // Absent-or-not-a-string and blank are different failures.
         let content = v["choices"][0]["message"]["content"]
             .as_str()
