@@ -417,3 +417,13 @@ The native RegisterHotKey binding uses no repeat, checks configured modifier sid
 reports conflicts, releases on Disable and reacquires on Enable. Reading uses the default
 Windows output. Explicit UIA selected ranges are the only text source; unsupported providers
 report numeric control-role/provider-count metadata, never text, names or window titles.
+
+
+### Narration UI Automation lifetime
+
+The dedicated selection worker retains one UI Automation client in an explicitly initialized
+COM MTA until that thread exits. Client references are released before the apartment; no
+interface is moved to another thread. An existing STA is refused rather than silently reused.
+Only the client connection persists: selected ranges, elements and text remain request-local.
+There are no accessibility event subscriptions or background document scans. Audio COM setup
+and dictation selection/target behavior are unchanged.

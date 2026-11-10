@@ -196,3 +196,22 @@ The no-selection error now includes only numeric role/provider-count diagnostics
 
 Notepad native narration remains failed at the previous build. Re-test after installing
 this repair and use its diagnostics to investigate; green CI is not native acceptance.
+
+
+## Selection client lifecycle repair (2026-11-10)
+
+Issue #39 follows the failed owner checks on af15486: no selection state, focused role 50033,
+visible providers 0. The shortcut fired but selection failed before synthesis. These are failed
+native checks, not TTS endpoint evidence. The computer-use helper was unavailable; real-app
+selection still requires owner operation.
+
+A native COM regression demonstrated the old selection helper entering an STA. Selection now
+retains its own MTA client across requests. Tests cover explicit MTA ownership, client identity
+across requests, nested initialization balance, and refusal of an existing STA without disturbing
+it. Parallel tests may leave the process MTA alive, so balance checks distinguish implicit MTA
+membership from an owned initialization. No desktop content is accessed by these lifecycle tests.
+
+This aligns the selection worker with [Microsoft threading guidance](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-threading).
+It is a candidate repair for the observed provider failure, not proof that either target app now
+works. After installing, select synthetic text in Notepad and press Ctrl+Alt+R; verify speech and
+second-press Stop, then check the chat selection separately. Keep Ctrl+Shift+Z dictation separate.

@@ -68,3 +68,17 @@ The default-binding regression failed on the old shared default. Local fmt/clipp
 passed after repair (460 library + 5 CLI; 18 ignored). Dedicated selection worker and pipeline
 admission checks are covered; native Notepad behavior still requires owner-operated verification.
 This repair PR targets feat/read-aloud; parent #33 must remain draft until native acceptance.
+
+
+### Item 3 native follow-up: #39
+
+Repair #38 merged as bad24b1 after all four CI checks passed. Installed reviewed head af15486
+with owner-approved Synaptics array and restored prior TTS configuration; other settings and
+startup entry verified unchanged, rollback copies retained. Owner retried both applications and
+reported failure: focused role 50033, visible providers 0. Parent #33 remains draft.
+
+Follow-up #39 isolates the selection client's COM lifecycle: a native regression failed on the
+borrowed audio STA; a dedicated persistent MTA client replaces it without changing dictation.
+Code/CI proof and real-app selection acceptance remain separate checkpoints.
+
+Local validation: fmt, clippy, 463 library + 5 CLI tests passed (18 ignored); benchmark self-test passed. Three native COM lifecycle tests pass. Native app acceptance remains pending.

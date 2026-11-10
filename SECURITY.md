@@ -148,3 +148,13 @@ Lookup inspects the focused control and visible foreground text-selection provid
 It never asks for an element name/value or document text. GetText is called only after selected
 range endpoints prove the range non-degenerate. Equal parent/child selections are deduplicated;
 different selected text is refused. Only providers advertising TextPattern are inspected; element names/values and document contents are not read. The source window is rechecked before a payload can reach TTS.
+
+
+### Narration UI Automation lifetime
+
+The dedicated selection worker retains one UI Automation client in an explicitly initialized
+COM MTA until that thread exits. Client references are released before the apartment; no
+interface is moved to another thread. An existing STA is refused rather than silently reused.
+Only the client connection persists: selected ranges, elements and text remain request-local.
+There are no accessibility event subscriptions or background document scans. Audio COM setup
+and dictation selection/target behavior are unchanged.
