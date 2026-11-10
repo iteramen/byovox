@@ -49,3 +49,22 @@ Tracking: https://github.com/iteramen/byovox/issues/35; paired app: https://gith
 
 - GREEN (desktop): fmt, clippy, full tests (438 library + 5 CLI passed; 18 ignored), and benchmark self-test passed. The existing pipeline raw-fallback regression also passed.
 - Implementation complete locally; CI and PR review pending. Installed binaries are unchanged.
+
+## Standing owner ruling and item 3 (2026-11-10)
+
+Owner authorized continuing the queue autonomously and merging each repair on green CI.
+Pause only for a real blocker, owner decision, or required manual test. Keep feature PRs
+unmerged while their runtime acceptance remains failed. Corrections to an unmerged feature
+are reviewed as stacked PRs into that feature branch.
+
+Item 1 merged: Android #49 / 46c97b6, desktop #36 / 760b5e0.
+Item 2 merged: Android #51 / 281ab39; native transport header/body probes passed.
+Item 3 in progress: separate narration default/binding validation; asynchronous, bounded
+selection lookup so dictation release/cancel cannot wait behind Windows accessibility.
+Notepad selection failure remains a separate native diagnostic checkpoint after this repair.
+
+Item 3 issue: https://github.com/iteramen/byovox/issues/37.
+The default-binding regression failed on the old shared default. Local fmt/clippy/full tests
+passed after repair (460 library + 5 CLI; 18 ignored). Dedicated selection worker and pipeline
+admission checks are covered; native Notepad behavior still requires owner-operated verification.
+This repair PR targets feat/read-aloud; parent #33 must remain draft until native acceptance.

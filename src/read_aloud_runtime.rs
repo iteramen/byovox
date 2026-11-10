@@ -8,6 +8,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use winit::event_loop::EventLoopProxy;
 
+type SelectionPending = Arc<(Mutex<Option<(u64, isize)>>, Condvar)>;
+
 type Pending = Arc<(Mutex<Option<(u64, Vec<(String, Endpoint)>)>>, Condvar)>;
 
 fn selection(window: isize) -> Result<Option<String>, String> {
@@ -22,11 +24,13 @@ fn selection(window: isize) -> Result<Option<String>, String> {
     }
 }
 
+#[derive(Clone)]
 pub struct Manager {
     config: TtsConfig,
     generation: Arc<AtomicU64>,
     active: Arc<AtomicU64>,
     pending: Pending,
+    selection_pending: SelectionPending,
     player: Arc<Mutex<Option<rodio::Player>>>,
     shared: Arc<Mutex<Shared>>,
     proxy: EventLoopProxy<UserEvent>,
@@ -157,20 +161,75 @@ impl Manager {
                     }
                 }
             })?;
-        Ok(Self {
+        let manager = Self {
             config,
             generation,
             active,
             pending,
+            selection_pending: Arc::new((Mutex::new(None), Condvar::new())),
             player,
             shared,
             proxy,
-        })
+        };
+        let lookup = manager.clone();
+        std::thread::Builder::new()
+            .name("byovox-selection".into())
+            .spawn(move || {
+                loop {
+                    let (id, window) = {
+                        let (lock, cv) = &*lookup.selection_pending;
+                        let mut slot = lock.lock().unwrap_or_else(|p| p.into_inner());
+                        while slot.is_none() {
+                            slot = cv.wait(slot).unwrap_or_else(|p| p.into_inner());
+                        }
+                        slot.take().expect("pending selection")
+                    };
+                    let current = || lookup.generation.load(Ordering::SeqCst) == id;
+                    let prepared = guarded_selection(&lookup.shared, current, || selection(window))
+                        .and_then(|text| lookup.config.prepare(&text));
+                    if !current() {
+                        continue;
+                    }
+                    match prepared {
+                        Ok(utterances) => {
+                            let mut slot =
+                                lookup.pending.0.lock().unwrap_or_else(|p| p.into_inner());
+                            if !current() {
+                                continue;
+                            }
+                            *slot = Some((id, utterances));
+                            lookup.pending.1.notify_one();
+                        }
+                        Err(error) => {
+                            if lookup
+                                .active
+                                .compare_exchange(id, 0, Ordering::SeqCst, Ordering::SeqCst)
+                                .is_ok()
+                            {
+                                report(
+                                    &lookup.shared,
+                                    &lookup.proxy,
+                                    &lookup.generation,
+                                    id,
+                                    IndicatorState::Error,
+                                    Some(error),
+                                );
+                            }
+                        }
+                    }
+                }
+            })?;
+        Ok(manager)
     }
 
     pub fn stop(&self) {
         let id = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let was_active = self.active.swap(0, Ordering::SeqCst) != 0;
+        self.selection_pending
+            .0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
         self.pending
             .0
             .lock()
@@ -208,82 +267,164 @@ impl Manager {
         );
     }
 
-    /// True consumes this physical press and its release; false keeps normal dictation handling.
-    pub fn contextual(&self, window: isize) -> bool {
-        if self.is_active() {
-            self.stop();
-            return true;
-        }
-        {
-            let shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
-            if !shared.enabled {
-                return true;
-            }
-            // A recording press must retain normal hold/toggle semantics regardless of selection.
-            if shared.state != "idle" || shared.pending_actions != 0 {
-                return false;
-            }
-        }
-        match selection(window) {
-            Ok(None) => false,
-            Ok(Some(text)) => {
-                self.begin(Ok(text));
-                true
-            }
-            Err(error) => {
-                self.begin(Err(error));
-                true
-            }
-        }
-    }
-
     pub fn toggle(&self, window: isize) {
         if self.is_active() {
             self.stop();
             return;
         }
-        self.begin(
-            selection(window)
-                .and_then(|text| text.ok_or_else(|| "Read aloud: select text first".into())),
-        );
-    }
-
-    fn begin(&self, selected: Result<String, String>) {
         let id = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        let result = (|| {
-            {
-                let shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
-                if !shared.enabled {
-                    return Err("Read aloud: byovox is disabled".into());
-                }
-                if shared.state != "idle" || shared.pending_actions != 0 {
-                    return Err("Read aloud: finish the current dictation first".into());
-                }
-            }
-            self.config.prepare(&selected?)
-        })();
-        match result {
-            Ok(utterances) => {
-                self.active.store(id, Ordering::SeqCst);
-                *self.pending.0.lock().unwrap_or_else(|p| p.into_inner()) = Some((id, utterances));
-                report(
-                    &self.shared,
-                    &self.proxy,
-                    &self.generation,
-                    id,
-                    IndicatorState::Working,
-                    None,
-                );
-                self.pending.1.notify_one();
-            }
-            Err(error) => report(
+        if let Err(error) = selection_admission(&self.shared) {
+            report(
                 &self.shared,
                 &self.proxy,
                 &self.generation,
                 id,
                 IndicatorState::Error,
                 Some(error),
-            ),
+            );
+            return;
         }
+        self.active.store(id, Ordering::SeqCst);
+        *self
+            .selection_pending
+            .0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some((id, window));
+        report(
+            &self.shared,
+            &self.proxy,
+            &self.generation,
+            id,
+            IndicatorState::Working,
+            None,
+        );
+        self.selection_pending.1.notify_one();
+    }
+}
+
+fn selection_admission(shared: &Mutex<Shared>) -> Result<(), String> {
+    let state = shared.lock().unwrap_or_else(|p| p.into_inner());
+    if !state.enabled {
+        return Err("Read aloud: byovox is disabled".into());
+    }
+    if state.state != "idle" || state.pending_actions != 0 {
+        return Err("Read aloud: finish the current dictation first".into());
+    }
+    Ok(())
+}
+
+fn guarded_selection(
+    shared: &Mutex<Shared>,
+    current: impl Fn() -> bool,
+    select: impl FnOnce() -> Result<Option<String>, String>,
+) -> Result<String, String> {
+    if !current() {
+        return Err("Read aloud: cancelled".into());
+    }
+    selection_admission(shared)?;
+    let selected = select()?;
+    if !current() {
+        return Err("Read aloud: cancelled".into());
+    }
+    selection_admission(shared)?;
+    selected.ok_or_else(|| "Read aloud: select text first".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Barrier, atomic::AtomicBool};
+
+    #[test]
+    fn busy_disabled_and_cancelled_reads_never_inspect_selection() {
+        let shared = Mutex::new(Shared::default());
+        shared.lock().unwrap().state = "recording";
+        assert!(
+            guarded_selection(
+                &shared,
+                || true,
+                || panic!("selection accessed while recording")
+            )
+            .is_err()
+        );
+        shared.lock().unwrap().state = "idle";
+        shared.lock().unwrap().pending_actions = 1;
+        assert!(
+            guarded_selection(
+                &shared,
+                || true,
+                || panic!("selection accessed before queued action")
+            )
+            .is_err()
+        );
+        shared.lock().unwrap().pending_actions = 0;
+        shared.lock().unwrap().enabled = false;
+        assert!(
+            guarded_selection(
+                &shared,
+                || true,
+                || panic!("selection accessed while disabled")
+            )
+            .is_err()
+        );
+        shared.lock().unwrap().enabled = true;
+        assert!(
+            guarded_selection(
+                &shared,
+                || false,
+                || panic!("selection accessed after cancel")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn cancellation_does_not_wait_for_lookup_and_drops_its_late_text() {
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        let current = Arc::new(AtomicBool::new(true));
+        let entered = Arc::new(Barrier::new(2));
+        let finish = Arc::new(Barrier::new(2));
+        let (s, c, e, f) = (
+            shared.clone(),
+            current.clone(),
+            entered.clone(),
+            finish.clone(),
+        );
+        let worker = std::thread::spawn(move || {
+            guarded_selection(
+                &s,
+                || c.load(Ordering::SeqCst),
+                || {
+                    e.wait();
+                    f.wait();
+                    Ok(Some("synthetic selection".into()))
+                },
+            )
+        });
+        entered.wait();
+        // The slow provider owns no shared-state lock: stop/recording can progress immediately.
+        shared
+            .try_lock()
+            .expect("lookup must not hold the dispatcher state")
+            .state = "recording";
+        current.store(false, Ordering::SeqCst);
+        finish.wait();
+        assert_eq!(worker.join().unwrap().unwrap_err(), "Read aloud: cancelled");
+    }
+
+    #[test]
+    fn admission_is_checked_again_after_lookup() {
+        let shared = Mutex::new(Shared::default());
+        assert!(
+            guarded_selection(
+                &shared,
+                || true,
+                || {
+                    shared.lock().unwrap().pending_actions = 1;
+                    Ok(Some("synthetic selection".into()))
+                }
+            )
+            .is_err()
+        );
     }
 }

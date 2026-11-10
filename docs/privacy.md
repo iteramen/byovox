@@ -225,12 +225,13 @@ also welcome as [GitHub issues](https://github.com/iteramen/byovox/issues).
 
 ## Optional read aloud
 
-With `[tts].enabled = true`, the existing dictation shortcut reads explicitly selected text by
-default; a verified empty selection retains normal microphone dictation behavior. Another press
-stops reading, and its release never starts/stops dictation. A separate read-only shortcut remains
-optional. On the explicit gesture, Windows UI Automation checks the focused control and visible
-foreground text-selection providers. It uses a filtered UIA TextPattern-provider snapshot with at most 128 returned visible TextPattern providers and a 1.5-second lookup
-budget (a platform call can additionally take its configured one-second timeout). GetText is used
+With `[tts].enabled = true`, Ctrl+Alt+R reads explicitly selected text by default.
+Dictation has a separate shortcut; empty legacy narration bindings resolve to Ctrl+Alt+R.
+Another narration press stops reading. Selection discovery runs on one bounded worker,
+with enabled/busy/generation checks before and after lookup. On the explicit gesture,
+Windows UI Automation checks the focused control and visible
+foreground text-selection providers. It uses a filtered UIA TextPattern-provider snapshot with at most 128 returned visible TextPattern providers and a 1.5-second budget checked between providers
+(each platform call has a one-second timeout; this is not a hard total-time bound). GetText is used
 only for a non-degenerate selected range. Password fields, conflicting ranges, provider/limit errors
 or a changed window refuse the action without opening the microphone. It never falls back to the
 clipboard or document contents (`platform::windows::inject::selected_text_optional`). Only that text goes

@@ -407,15 +407,13 @@ design — that is what it is for.
 
 ## Read-aloud selection
 
-With TTS enabled, the existing dictation shortcut is contextual by default (`tts.hotkey = ""`):
-selected text reads; no selection dictates. Releasing a reading press leaves speech running;
-press again or Escape to stop. Selection lookup covers the focused control and visible foreground
-document providers, so a focused browser composer does not hide a highlighted chat paragraph.
-Conflicting/unsupported selection state, passwords, errors and budget limits refuse without opening
-the microphone. Only explicit UIA selected ranges are read; there is no Ctrl+C or document fallback.
+With TTS enabled, Ctrl+Alt+R is the separate narration shortcut. Empty legacy bindings
+resolve to that chord; overlapping dictation/narration triggers are rejected. Dictation
+never queries selection. A dedicated selection worker keeps UIA calls off the action
+dispatcher, so release/Escape/Disable remain responsive. One pending lookup replaces old
+queued work; generation and pipeline-state checks reject late or busy results.
 
-An explicit different `tts.hotkey` opts into the separate native RegisterHotKey binding with no
-repeat. It accepts Ctrl/Alt/Shift/Win modifiers and a non-modifier trigger, checks configured sides,
-reports conflicts, releases on Disable and reacquires on Enable. The contextual mode uses the
-existing hook and supports the existing dictation key grammar, including bare modifiers. Sound
-uses the default Windows output; reading does not open the microphone.
+The native RegisterHotKey binding uses no repeat, checks configured modifier sides,
+reports conflicts, releases on Disable and reacquires on Enable. Reading uses the default
+Windows output. Explicit UIA selected ranges are the only text source; unsupported providers
+report numeric control-role/provider-count metadata, never text, names or window titles.

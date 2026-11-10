@@ -313,14 +313,7 @@ pub fn run(cfg: &Config, config_path: &Path) -> bool {
                 None,
                 &format!(
                     "{}; configured (selection/playback not tested); he={}, ru={}",
-                    if cfg.tts.shared_hotkey(&cfg.hotkey.key) {
-                        format!(
-                            "{} (shared: selected text reads, otherwise dictate)",
-                            cfg.hotkey.key
-                        )
-                    } else {
-                        cfg.tts.hotkey.clone()
-                    },
+                    cfg.tts.effective_hotkey(),
                     if cfg
                         .tts
                         .by_language

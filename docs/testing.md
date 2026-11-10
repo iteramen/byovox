@@ -184,3 +184,15 @@ Document control roles, which can miss selection providers exposed as Edit or ot
 now filters IsTextPatternAvailable=true and IsOffscreen=false instead. GetText remains restricted
 to explicit non-degenerate selected ranges, with the same bounds/ambiguity/password/origin checks.
 Notepad narration acceptance of this follow-up is pending; the previous failed attempts are not passes.
+
+## Separate dispatch repair (2026-11-10)
+
+Issue #37. Default-binding regression failed before the change. The product now uses a
+separate default binding, resolves old empty bindings to Ctrl+Alt+R, and rejects overlap.
+Unit checks cover recording/queued-action/disabled admission without selection access,
+cancellation during blocked lookup without holding the pipeline mutex, and post-lookup
+admission. Selection runs on its own bounded worker, not on the action dispatcher.
+The no-selection error now includes only numeric role/provider-count diagnostics.
+
+Notepad native narration remains failed at the previous build. Re-test after installing
+this repair and use its diagnostics to investigate; green CI is not native acceptance.

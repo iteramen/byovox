@@ -178,13 +178,12 @@ timeout_s = 20
 connect_timeout_s = 5
 
 [tts]
-# Default: the dictation shortcut reads selected text, otherwise it dictates normally.
-# Press again to stop reading; releasing the chord does not end read-aloud playback.
-# An explicit different chord enables an optional dedicated read shortcut (native Windows
-# Ctrl/Alt/Shift/Win modifiers and a non-modifier trigger). Empty uses [hotkey].key.
+# Separate narration shortcut: select text, press once to read, press again to stop.
+# Dictation retains its own binding. Empty resolves to Ctrl+Alt+R; overlaps are rejected.
+# Use Ctrl/Alt/Shift/Win modifiers and a non-modifier trigger.
 # Enable after configuring your own OpenAI-compatible /audio/speech base URL.
 enabled = false
-hotkey = ""
+hotkey = "ControlLeft+AltLeft+R"
 base_url = ""
 model = "kokoro"
 voice = "af_bella"
