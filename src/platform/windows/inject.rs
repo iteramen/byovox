@@ -1,9 +1,14 @@
+use std::cell::RefCell;
+use std::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{E_NOINTERFACE, E_POINTER, HWND};
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern,
@@ -257,12 +262,61 @@ pub fn selected_text(expected_window: isize) -> Result<String, String> {
     selected_text_optional(expected_window)?.ok_or_else(|| "Read aloud: select text first".into())
 }
 
+// Selection has its own COM lifetime. Do not borrow the audio STA helper or move
+// its client between threads: UIA's cross-process helper lifetime follows the apartment.
+struct SelectionApartment(PhantomData<Rc<()>>);
+
+impl SelectionApartment {
+    fn enter() -> Result<Self, String> {
+        // SAFETY: this guard owns one successful initialization on the calling thread.
+        // RPC_E_CHANGED_MODE is an error here: an existing STA is not a valid substitute.
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+            .ok()
+            .map_err(|_| "Read aloud: Windows text access requires its own MTA worker")?;
+        Ok(Self(PhantomData))
+    }
+}
+
+impl Drop for SelectionApartment {
+    fn drop(&mut self) {
+        // SAFETY: !Send/!Sync guard balances its successful initialization on this thread.
+        unsafe { CoUninitialize() };
+    }
+}
+
+struct SelectionAutomation {
+    // Fields drop in declaration order: release the client before leaving COM.
+    uia: IUIAutomation,
+    _apartment: SelectionApartment,
+}
+
+impl SelectionAutomation {
+    fn new() -> Result<Self, String> {
+        let apartment = SelectionApartment::enter()?;
+        let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
+        Ok(Self {
+            uia,
+            _apartment: apartment,
+        })
+    }
+}
+
+thread_local! {
+    // Only the dedicated selection worker calls this in production. Retain the client,
+    // not elements or text, between explicit shortcut requests; no event subscriptions.
+    static SELECTION_AUTOMATION: RefCell<Option<SelectionAutomation>> = const { RefCell::new(None) };
+}
+
 fn with_selection_automation<T>(
     read: impl FnOnce(&IUIAutomation) -> Result<T, String>,
 ) -> Result<T, String> {
-    let _com = Apartment::enter().map_err(|_| "Read aloud: Windows text access unavailable")?;
-    let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
-    read(&uia)
+    SELECTION_AUTOMATION.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(SelectionAutomation::new()?);
+        }
+        read(&slot.as_ref().expect("initialized selection client").uia)
+    })
 }
 
 pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, String> {
@@ -623,6 +677,62 @@ impl Target for WinTarget {
 
 #[cfg(test)]
 mod tests {
+    // Other tests can keep the process MTA alive. An uninitialized thread may then
+    // report an implicit MTA, which is distinct from owning an explicit initialization.
+    fn assert_no_explicit_apartment() {
+        use windows::Win32::System::Com::{
+            APTTYPE, APTTYPEQUALIFIER, APTTYPEQUALIFIER_IMPLICIT_MTA, CoGetApartmentType,
+        };
+        let mut apartment = APTTYPE::default();
+        let mut qualifier = APTTYPEQUALIFIER::default();
+        // SAFETY: live out-parameters on this thread.
+        if unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.is_ok() {
+            assert_eq!(qualifier, APTTYPEQUALIFIER_IMPLICIT_MTA);
+        }
+    }
+
+    #[test]
+    fn narration_selection_refuses_sta_without_uninitializing_it() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{APTTYPE, APTTYPEQUALIFIER, CoGetApartmentType};
+            let _audio = super::Apartment::enter().unwrap();
+            let mut before = APTTYPE::default();
+            let mut after = APTTYPE::default();
+            let mut qualifier = APTTYPEQUALIFIER::default();
+            // SAFETY: live out-parameters in the audio apartment on this fresh thread.
+            unsafe { CoGetApartmentType(&mut before, &mut qualifier) }.unwrap();
+            assert!(super::with_selection_automation(|_| Ok(())).is_err());
+            unsafe { CoGetApartmentType(&mut after, &mut qualifier) }.unwrap();
+            assert_eq!(
+                before, after,
+                "failed MTA initialization must not release the STA"
+            );
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn narration_selection_balances_nested_mta_initialization() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{
+                APTTYPE, APTTYPE_MTA, APTTYPEQUALIFIER, CoGetApartmentType,
+            };
+            let outer = super::SelectionApartment::enter().unwrap();
+            let inner = super::SelectionApartment::enter().unwrap();
+            drop(inner);
+            let mut apartment = APTTYPE::default();
+            let mut qualifier = APTTYPEQUALIFIER::default();
+            // SAFETY: live out-parameters; dropping the inner S_FALSE guard leaves the outer alive.
+            unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.unwrap();
+            assert_eq!(apartment, APTTYPE_MTA);
+            drop(outer);
+            assert_no_explicit_apartment();
+        })
+        .join()
+        .unwrap();
+    }
+
     #[test]
     fn narration_selection_client_keeps_its_mta_between_requests() {
         std::thread::spawn(|| {
@@ -633,7 +743,7 @@ mod tests {
             let mut apartment = APTTYPE::default();
             let mut qualifier = APTTYPEQUALIFIER::default();
             // SAFETY: live out-parameters on this fresh worker thread.
-            assert!(unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.is_err());
+            assert_no_explicit_apartment();
             let first = super::with_selection_automation(|uia| {
                 // SAFETY: live out-parameters, no interface crosses threads.
                 unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.unwrap();

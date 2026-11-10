@@ -250,3 +250,13 @@ late replies are discarded, though a request already received by the server can 
 Reading never opens the microphone or injects text. Hebrew/Russian configuration slots require
 supported voices and do not reuse an English voice silently. Dominant script chooses the route,
 so Latin-script text uses the English/default route rather than a semantic language detector.
+
+
+### Narration UI Automation lifetime
+
+The dedicated selection worker retains one UI Automation client in an explicitly initialized
+COM MTA until that thread exits. Client references are released before the apartment; no
+interface is moved to another thread. An existing STA is refused rather than silently reused.
+Only the client connection persists: selected ranges, elements and text remain request-local.
+There are no accessibility event subscriptions or background document scans. Audio COM setup
+and dictation selection/target behavior are unchanged.
