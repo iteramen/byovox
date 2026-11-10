@@ -62,3 +62,9 @@ Item 2 merged: Android #51 / 281ab39; native transport header/body probes passed
 Item 3 in progress: separate narration default/binding validation; asynchronous, bounded
 selection lookup so dictation release/cancel cannot wait behind Windows accessibility.
 Notepad selection failure remains a separate native diagnostic checkpoint after this repair.
+
+Item 3 issue: https://github.com/iteramen/byovox/issues/37.
+The default-binding regression failed on the old shared default. Local fmt/clippy/full tests
+passed after repair (460 library + 5 CLI; 18 ignored). Dedicated selection worker and pipeline
+admission checks are covered; native Notepad behavior still requires owner-operated verification.
+This repair PR targets feat/read-aloud; parent #33 must remain draft until native acceptance.

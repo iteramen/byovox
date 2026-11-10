@@ -122,7 +122,7 @@ Redirects are disabled, and server bodies never reach errors/logs. Each response
 12 MiB and PCM16 mono/stereo WAV at 8–48 kHz, ≤120 seconds. Known streaming length sentinels are
 completed from the bounded body; arbitrary truncation/oversized declarations are rejected.
 
-One serial worker, one pending selection and a generation fence prevent unbounded queued text
+One selection worker and one synthesis worker, each with one replaceable pending slot, and a generation fence prevent unbounded queued text
 and late playback/UI updates. Stop/Disable/dictation clears pending work and stops the player;
 a blocking network request may finish until its timeout, but cannot play. Queued pipeline actions
 are counted until handled/drained so TTS cannot start before a pending microphone action becomes
@@ -135,15 +135,16 @@ credentials redirected or inherited without consent; selected text/audio persist
 errors; audio played after cancellation. The configured TTS server's retention and inaccurate
 third-party accessibility metadata are outside the client boundary.
 
-### Contextual read/dictate shortcut
+### Separate narration dispatch
 
-When TTS is enabled, an empty `tts.hotkey` (the default), or the same chord as dictation, shares
-the existing dictation hook. A verified non-empty selection reads; a verified empty selection
-retains the existing recording behavior. Reader presses consume their release. Unsupported,
-ambiguous, password, provider-error or over-budget selection state refuses without a microphone
-fallback. An optional different TTS chord retains the dedicated registration behavior above.
+Narration defaults to Ctrl+Alt+R, including when the configured binding is empty. Binding
+validation rejects overlap with dictation/cancel. Dictation never waits for selection lookup.
+The lookup worker checks enabled/busy/pending-action state before and after UIA, and checks
+generation before queuing synthesis. Stop/Disable/dictation invalidates generations and clears
+both queues; late lookup results cannot revive narration. No shared-state lock is held across
+UIA calls. Unsupported-selection errors include only numeric control-role/provider-count metadata.
 
-Lookup inspects the focused control and visible foreground text-selection providers, bounded to 128 returned visible TextPattern providers and a 1.5-second budget plus at most an in-progress platform call's one-second timeout.
+Lookup inspects the focused control and visible foreground text-selection providers, bounded to 128 returned visible TextPattern providers and a 1.5-second budget checked between providers. Each platform call has a one-second timeout; multiple calls per provider mean this is not a hard total-time bound.
 It never asks for an element name/value or document text. GetText is called only after selected
 range endpoints prove the range non-degenerate. Equal parent/child selections are deduplicated;
 different selected text is refused. Only providers advertising TextPattern are inspected; element names/values and document contents are not read. The source window is rechecked before a payload can reach TTS.

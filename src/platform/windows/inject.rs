@@ -354,7 +354,13 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
             return Err("Read aloud: the selected window changed; select again".into());
         }
         if !supported {
-            return Err("Read aloud: this application does not expose selection state".into());
+            let role = focused
+                .CurrentControlType()
+                .map(|value| value.0)
+                .unwrap_or(0);
+            return Err(format!(
+                "Read aloud: no selection state (focused role {role}, visible providers {count})"
+            ));
         }
         crate::read_aloud::unique_selection(selections)
     }

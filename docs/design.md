@@ -252,18 +252,18 @@ model is in [SECURITY.md](../SECURITY.md).
 
 ## Read selected text aloud
 
-The existing dictation hook emits a contextual press by default when TTS is enabled. The
-foreground HWND is captured before dispatch: a non-empty explicit selection reads, a verified
-empty selection forwards the original dictation press/release, and an active reader stops.
-`ContextGesture` consumes a reading press's release, preserving normal hold/toggle behavior.
-Recording/working pipeline actions retain their existing handling, without a fresh selection query.
-An explicit different `tts.hotkey` enables the optional native RegisterHotKey read-only binding.
+Narration uses its own native Ctrl+Alt+R binding by default. Empty legacy bindings resolve
+to that default; overlapping dictation/cancel triggers are rejected. The action dispatcher
+only queues narration requests, leaving dictation press/release/cancel responsive. One
+selection worker owns a replaceable pending HWND slot, reads only after admission checks,
+and checks cancellation and pipeline state again before preparing synthesis. The existing
+TTS worker retains its own single pending prepared-text slot. Generation fences suppress
+late lookup, playback and UI results. No shared-state lock is held across selection access.
 
 `selected_text_optional` checks the focused element and visible foreground TextPattern providers, addressing
 chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
 text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
-selections. A filtered UIA TextPattern-provider snapshot returns at most 128 visible providers within a 1.5-second budget, plus at most the current
-platform call's one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, limits or a window change refuse without a microphone fallback.
+selections. A filtered UIA TextPattern-provider snapshot returns at most 128 visible providers with a 1.5-second budget checked between providers (not a hard total wall-clock bound); each platform call has a one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, limits or a window change refuse without a microphone fallback.
 There is no clipboard, value or whole-document fallback.
 
 The action dispatcher cancels TTS before forwarding dictation/cancel events. Pending forwarded

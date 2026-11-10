@@ -119,13 +119,9 @@ fn platform_detect(cfg: &Config, mode: InjectMode) -> Result<Backends> {
     let mut hotkey =
         HookHotkey::new(&cfg.hotkey.key, &cfg.hotkey.cancel_key).map_err(anyhow::Error::msg)?;
     if cfg.tts.enabled {
-        hotkey = if cfg.tts.shared_hotkey(&cfg.hotkey.key) {
-            hotkey.with_contextual_read_aloud()
-        } else {
-            hotkey
-                .with_read_aloud(&cfg.tts.hotkey, &cfg.hotkey.cancel_key)
-                .map_err(anyhow::Error::msg)?
-        };
+        hotkey = hotkey
+            .with_read_aloud(cfg.tts.effective_hotkey(), &cfg.hotkey.cancel_key)
+            .map_err(anyhow::Error::msg)?;
     }
     let capture =
         crate::capture::CpalCapture::open(&cfg.capture.device).map_err(anyhow::Error::msg)?;

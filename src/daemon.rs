@@ -228,21 +228,10 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
     std::thread::Builder::new()
         .name("byovox-actions".into())
         .spawn(move || {
-            let mut gesture = hotkey::ContextGesture::default();
             while let Ok(event) = dispatch_rx.recv() {
+                // Old contextual events, if supplied by a backend, retain dictation semantics.
                 let event = match event {
-                    hotkey::HotkeyEvent::ContextPressed(window) => {
-                        let Some(event) = gesture.press(manager.contextual(window)) else {
-                            continue;
-                        };
-                        event
-                    }
-                    hotkey::HotkeyEvent::Released => {
-                        let Some(event) = gesture.release() else {
-                            continue;
-                        };
-                        event
-                    }
+                    hotkey::HotkeyEvent::ContextPressed(_) => hotkey::HotkeyEvent::Pressed,
                     event => event,
                 };
                 match event {

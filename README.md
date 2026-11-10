@@ -228,21 +228,21 @@ Read aloud is off by default. Configure `[tts]` in your TOML (see
 ```toml
 [tts]
 enabled = true
-hotkey = "" # share your existing dictation shortcut
+hotkey = "ControlLeft+AltLeft+R"
 base_url = "http://<tailnet-host>:8770/v1"
 model = "kokoro"
 voice = "af_bella"
 ```
 
-By default, use your existing dictation shortcut: with selected text it reads aloud; with no
-selection it dictates using your normal hold/toggle mode. Releasing a reading press does not
-stop playback. Another press or Escape stops reading. An explicit different `tts.hotkey` opts into
-a separate read-only shortcut, where an empty selection is refused.
+Select text and press Ctrl+Alt+R to read it aloud. Press again or Escape to stop.
+Dictation keeps its own shortcut and never depends on selection lookup. An empty legacy
+`tts.hotkey` uses Ctrl+Alt+R; overlapping dictation/narration bindings are rejected.
+Selection lookup runs on a bounded worker so slow providers cannot delay dictation stop/cancel.
 
 The focused control and visible foreground text-selection providers are checked, so highlighting
 chat text can work even when the composer retains focus. Only explicit non-empty TextPattern
 ranges are read; no document/value/clipboard fallback is used. Passwords, ambiguous selections,
-provider errors and lookup limits refuse the contextual action without opening the microphone.
+provider errors and lookup limits refuse narration without opening the microphone.
 Only chosen text goes to your TTS server. Reading copies, types, records and saves nothing. A changed foreground window before selection is
 read is refused. The server can retain requests under its own policy.
 

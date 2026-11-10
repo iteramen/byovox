@@ -40,7 +40,7 @@ impl Default for TtsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            hotkey: String::new(),
+            hotkey: "ControlLeft+AltLeft+R".into(),
             base_url: String::new(),
             model: "kokoro".into(),
             voice: "af_bella".into(),
@@ -65,26 +65,19 @@ pub struct Endpoint {
 }
 
 impl TtsConfig {
-    pub fn shared_hotkey(&self, dictation: &str) -> bool {
+    pub fn effective_hotkey(&self) -> &str {
         if self.hotkey.trim().is_empty() {
-            return true;
+            "ControlLeft+AltLeft+R"
+        } else {
+            &self.hotkey
         }
-        let (Ok(mut a), Ok(mut b)) = (
-            crate::hotkey::parse_chord(&self.hotkey),
-            crate::hotkey::parse_chord(dictation),
-        ) else {
-            return false;
-        };
-        a.modifiers.sort();
-        b.modifiers.sort();
-        a == b
     }
     pub fn validate_hotkeys(&self, dictation: &str, cancel: &str) -> Result<(), String> {
-        if !self.enabled || self.shared_hotkey(dictation) {
+        if !self.enabled {
             return Ok(());
         }
-        let read =
-            crate::hotkey::parse_chord(&self.hotkey).map_err(|_| "tts.hotkey: invalid chord")?;
+        let read = crate::hotkey::parse_chord(self.effective_hotkey())
+            .map_err(|_| "tts.hotkey: invalid chord")?;
         let dictate =
             crate::hotkey::parse_chord(dictation).map_err(|_| "hotkey.key: invalid chord")?;
         if matches!(
@@ -133,7 +126,8 @@ impl TtsConfig {
             return Err("tts.timeout_s: expected 1–120 seconds".into());
         }
         if self.enabled && !self.hotkey.trim().is_empty() {
-            crate::hotkey::parse_chord(&self.hotkey).map_err(|_| "tts.hotkey: invalid chord")?;
+            crate::hotkey::parse_chord(self.effective_hotkey())
+                .map_err(|_| "tts.hotkey: invalid chord")?;
         }
         if self.enabled {
             self.endpoint("en")?;
@@ -439,11 +433,26 @@ mod tests {
     }
     #[test]
     fn narration_defaults_to_a_separate_shortcut_and_refuses_the_same_chord() {
-        let mut cfg = TtsConfig { enabled: true, ..Default::default() };
+        let mut cfg = TtsConfig {
+            enabled: true,
+            ..Default::default()
+        };
         assert_eq!(cfg.hotkey, "ControlLeft+AltLeft+R");
-        assert!(cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape").is_ok());
+        assert!(
+            cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape")
+                .is_ok()
+        );
+        cfg.hotkey.clear();
+        assert_eq!(cfg.effective_hotkey(), "ControlLeft+AltLeft+R");
+        assert!(
+            cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape")
+                .is_ok()
+        );
         cfg.hotkey = "ShiftLeft+ControlLeft+Z".into();
-        assert!(cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape").is_err());
+        assert!(
+            cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape")
+                .is_err()
+        );
     }
     fn server(
         status: u16,
