@@ -257,8 +257,22 @@ pub fn selected_text(expected_window: isize) -> Result<String, String> {
     selected_text_optional(expected_window)?.ok_or_else(|| "Read aloud: select text first".into())
 }
 
-pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, String> {
+fn with_selection_automation<T>(
+    read: impl FnOnce(&IUIAutomation) -> Result<T, String>,
+) -> Result<T, String> {
     let _com = Apartment::enter().map_err(|_| "Read aloud: Windows text access unavailable")?;
+    let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
+    read(&uia)
+}
+
+pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, String> {
+    with_selection_automation(|uia| selected_text_with_client(uia, expected_window))
+}
+
+fn selected_text_with_client(
+    uia: &IUIAutomation,
+    expected_window: isize,
+) -> Result<Option<String>, String> {
     let deadline = Instant::now() + Duration::from_millis(1500);
     // SAFETY: all interfaces belong to this apartment; no element/window is activated or modified.
     unsafe {
@@ -266,7 +280,6 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
         if foreground.is_invalid() || foreground.0 as isize != expected_window {
             return Err("Read aloud: the selected window changed; select again".into());
         }
-        let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
         let focused = uia.GetFocusedElement().map_err(|error| {
             format!(
                 "Read aloud: selected range unavailable (0x{:08X})",
@@ -280,7 +293,7 @@ pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, 
         {
             return Err("Read aloud: password fields are excluded".into());
         }
-        if top_level(&uia, &focused) != Some(foreground) {
+        if top_level(uia, &focused) != Some(foreground) {
             return Err("Read aloud: the selected window changed; select again".into());
         }
         let mut selections = Vec::new();
@@ -610,6 +623,44 @@ impl Target for WinTarget {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn narration_selection_client_keeps_its_mta_between_requests() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{
+                APTTYPE, APTTYPE_MTA, APTTYPEQUALIFIER, CoGetApartmentType,
+            };
+            use windows::core::Interface;
+            let mut apartment = APTTYPE::default();
+            let mut qualifier = APTTYPEQUALIFIER::default();
+            // SAFETY: live out-parameters on this fresh worker thread.
+            assert!(unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.is_err());
+            let first = super::with_selection_automation(|uia| {
+                // SAFETY: live out-parameters, no interface crosses threads.
+                unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.unwrap();
+                assert_eq!(
+                    apartment, APTTYPE_MTA,
+                    "selection must use MTA, not the audio STA"
+                );
+                Ok(uia.clone())
+            })
+            .unwrap();
+            // The apartment and its client must remain alive between shortcut requests.
+            unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.unwrap();
+            assert_eq!(apartment, APTTYPE_MTA);
+            super::with_selection_automation(|uia| {
+                assert_eq!(
+                    first.as_raw(),
+                    uia.as_raw(),
+                    "selection client must be reused"
+                );
+                Ok(())
+            })
+            .unwrap();
+        })
+        .join()
+        .unwrap();
+    }
+
     #[test]
     fn successful_null_selection_array_means_no_selected_range() {
         let null = Err::<(), _>(windows::core::Error::from_hresult(windows::core::HRESULT(
