@@ -1,4 +1,4 @@
-//! One serial synthesis worker and one bounded pending selection. No clipboard, microphone or text logging.
+//! One serial synthesis worker and one bounded pending selection. No microphone or text logging.
 use crate::indicator::IndicatorState;
 use crate::pipeline::Shared;
 use crate::read_aloud::{Endpoint, TtsConfig, synthesize};
@@ -12,14 +12,26 @@ type SelectionPending = Arc<(Mutex<Option<(u64, isize)>>, Condvar)>;
 
 type Pending = Arc<(Mutex<Option<(u64, Vec<(String, Endpoint)>)>>, Condvar)>;
 
-fn selection(window: isize) -> Result<Option<String>, String> {
+fn selection(
+    window: isize,
+    config: &TtsConfig,
+    current: &(impl Fn() -> bool + Sync),
+) -> Result<Option<String>, String> {
     #[cfg(windows)]
     {
-        crate::platform::windows::inject::selected_text_optional(window)
+        let chord = crate::hotkey::parse_chord(config.effective_hotkey())?;
+        let trigger = crate::platform::windows::hotkey::vk_for(&chord.trigger)
+            .ok_or("Read aloud: invalid shortcut")?;
+        crate::platform::windows::inject::narration_selection(
+            window,
+            config.copy_fallback,
+            trigger,
+            current,
+        )
     }
     #[cfg(not(windows))]
     {
-        let _ = window;
+        let _ = (window, config, current);
         Err("Read aloud: Windows selection backend unavailable".into())
     }
 }
@@ -185,8 +197,12 @@ impl Manager {
                         slot.take().expect("pending selection")
                     };
                     let current = || lookup.generation.load(Ordering::SeqCst) == id;
-                    let prepared = guarded_selection(&lookup.shared, current, || selection(window))
-                        .and_then(|text| lookup.config.prepare(&text));
+                    let prepared = guarded_selection(&lookup.shared, current, || {
+                        selection(window, &lookup.config, &|| {
+                            current() && selection_admission(&lookup.shared).is_ok()
+                        })
+                    })
+                    .and_then(|text| lookup.config.prepare(&text));
                     if !current() {
                         continue;
                     }

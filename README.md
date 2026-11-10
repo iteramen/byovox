@@ -241,12 +241,22 @@ Selection lookup runs on a bounded worker so slow providers cannot delay dictati
 
 The focused control and visible foreground text-selection providers are checked, so highlighting
 chat text can work even when the composer retains focus. Only explicit non-empty TextPattern
-ranges are read; no document/value/clipboard fallback is used. Passwords, ambiguous selections,
+ranges are read first. If none is available, guarded Copy fallback is enabled by default
+(`tts.copy_fallback = false` disables it). Passwords, ambiguous selections,
 provider errors and lookup limits refuse narration without opening the microphone.
-Only chosen text goes to your TTS server. Reading copies, types, records and saves nothing. A changed foreground window before selection is
+The selected range or the app's Copy result goes to your TTS server. Reading never types, records or saves text/audio. The Copy fallback temporarily uses the clipboard;
+clipboard history, sync or managers may retain that text. A changed foreground window before selection is
 read is refused. The server can retain requests under its own policy.
 
 English is the first target. Hebrew/Russian endpoint and voice slots are scaffolded but require
 supported server voices; missing voices refuse reading, with no English substitution. Routing is
 by dominant script per chunk, not semantic language detection: Latin-script text uses English.
 `byovox check` reports configuration only and does not exercise read-aloud selection or playback.
+
+
+Copy fallback waits for shortcut release, preserves supported clipboard formats and restores
+only if no newer clipboard update has arrived. It refuses unsupported/oversized clipboard snapshots,
+password fields, known terminal windows, stale/foreign updates and changed foreground controls.
+Select text first: applications define Copy behavior, and some copy a current line without a
+selection. Scintilla editors such as Notepad++ are explicitly checked for an empty selection.
+Support is app-dependent; the current qualification matrix is in [docs/testing.md](docs/testing.md).

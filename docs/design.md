@@ -264,7 +264,8 @@ late lookup, playback and UI results. No shared-state lock is held across select
 chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
 text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
 selections. A filtered UIA TextPattern-provider snapshot returns at most 128 visible providers with a 1.5-second budget checked between providers (not a hard total wall-clock bound); each platform call has a one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, limits or a window change refuse without a microphone fallback.
-There is no clipboard, value or whole-document fallback.
+There is no value or whole-document fallback. Missing/empty UIA selection can use the
+owner-approved, default-on guarded Copy fallback (`tts.copy_fallback = false` opts out).
 
 The action dispatcher cancels TTS before forwarding dictation/cancel events. Pending forwarded
 pipeline actions remain counted until handled or drained, preventing a subsequent read action
@@ -300,3 +301,15 @@ interface is moved to another thread. An existing STA is refused rather than sil
 Only the client connection persists: selected ranges, elements and text remain request-local.
 There are no accessibility event subscriptions or background document scans. Audio COM setup
 and dictation selection/target behavior are unchanged.
+
+
+### Copy selection transaction
+
+`selection_copy` runs only after the narration UIA guards. Shortcut release precedes UIA access.
+Copy has one scoped worker under the serial selection worker; the persistent UIA/MTA thread never
+owns its hidden message-only clipboard window. The transaction snapshots supported formats,
+checks source/focus/generation, sends one marked Ctrl+C batch, accepts only a changed source-owned
+Unicode clipboard result, then restores the snapshot before returning text. Sequence/owner checks
+occur under the clipboard lock, so a newer clipboard update is never overwritten. Preparation and
+late-result admission retain the existing generation/pipeline guards. See SECURITY.md for the
+format/size/time limits, failure boundaries and source-defined Copy semantics.

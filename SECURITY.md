@@ -111,7 +111,8 @@ If any of the above matters to you:
 
 Read aloud is off by default (`TtsConfig.enabled`). The shortcut event binds UIA access to the foreground HWND. `selected_text` excludes passwords, requires one non-empty contiguous
 TextPattern selection and checks the same foreground window before/after access. It does not
-activate windows, read a document/value fallback, touch the clipboard or inject keystrokes.
+activate windows or read a document/value fallback. The separate default-on Copy fallback
+is described below; it can inject Ctrl+C and temporarily change clipboard contents.
 UIA connection/transaction timeouts are one second; at most 20,000 code points are accepted.
 
 All ≤500-character chunks and dominant-script routes are prepared before any request. HE/RU need
@@ -126,11 +127,11 @@ One selection worker and one synthesis worker, each with one replaceable pending
 and late playback/UI updates. Stop/Disable/dictation clears pending work and stops the player;
 a blocking network request may finish until its timeout, but cannot play. Queued pipeline actions
 are counted until handled/drained so TTS cannot start before a pending microphone action becomes
-visible in pipeline state. Text/audio never enter `last`, capture logs, files or the clipboard.
+visible in pipeline state. Text/audio never enter `last`, capture logs or files; Copy fallback can expose selected text on the clipboard.
 A debug fixture records only configured-shortcut event counts and its own focus/playback flags;
 it stores no selected text or arbitrary key history.
 
-In scope: text read without explicit selection; password content read; wrong-window text accessed;
+In scope: stale/unrelated clipboard text read, or text read without an explicit narration action; password content read; wrong-window text accessed;
 credentials redirected or inherited without consent; selected text/audio persisted or echoed by
 errors; audio played after cancellation. The configured TTS server's retention and inaccurate
 third-party accessibility metadata are outside the client boundary.
@@ -158,3 +159,34 @@ interface is moved to another thread. An existing STA is refused rather than sil
 Only the client connection persists: selected ranges, elements and text remain request-local.
 There are no accessibility event subscriptions or background document scans. Audio COM setup
 and dictation selection/target behavior are unchanged.
+
+
+### Guarded Copy fallback (owner-approved default)
+
+`tts.copy_fallback` defaults to true, including existing TTS configurations. Set it false for
+UIA-only access. The explicit narration gesture first waits for key release and tries UIA.
+A missing/empty selection may use the focused app's Ctrl+C action. Password, ambiguity, UIA
+errors/limits and source changes do not fall through to Copy. Dictation never invokes this path.
+
+The Copy worker snapshots up to 64 supported HGLOBAL clipboard formats, at most 8 MiB, in RAM
+and preallocates restoration handles before sending anything. GDI/private handle formats and
+unreadable/oversized formats refuse before Copy. It requires released modifiers, the original
+foreground window/control, and a new nonzero clipboard sequence owned by the source process.
+Only bounded, nonempty, valid UTF-16 is accepted. It never cuts, pastes or selects all. Known
+terminal window classes and native password edit controls refuse. Scintilla's numeric
+SCI_GETSELECTIONEMPTY query refuses its current-line Copy behavior when nothing is selected.
+Other applications define Copy semantics; a newly copied current line is not universally
+distinguishable from an intended selection. This is not a proof of universal selection identity.
+
+Before TTS, it restores the preallocated formats only while holding the clipboard lock and only
+if the copied sequence/owner is still current. A newer update is left untouched and narration
+refuses. A partial SendInput failure still observes a possible Copy result for restoration.
+Cancellation/source changes prevent transmission but allow restoration of that Copy result.
+Copy observation uses a 1.2-second budget and restoration lock retries 500 ms; delayed clipboard
+rendering and OS calls can outlast those budgets. A late Copy after timeout or a restoration
+failure can leave copied text behind; it produces no narration. Restoration failures are surfaced.
+
+The source app writes the clipboard, so byovox cannot retroactively exclude that data from
+clipboard managers, Windows history or cloud sync. Restoration is not erasure from those services.
+No clipboard state is written to disk or diagnostic logs. OS clipboard ownership and source-app
+Copy behavior are trust assumptions, not protection from a malicious same-user process.

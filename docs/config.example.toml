@@ -184,6 +184,9 @@ connect_timeout_s = 5
 # Enable after configuring your own OpenAI-compatible /audio/speech base URL.
 enabled = false
 hotkey = "ControlLeft+AltLeft+R"
+# When accessibility cannot supply a range, use the app's Copy action.
+# Copy can enter clipboard history/sync/managers. False keeps UIA-only narration.
+copy_fallback = true
 base_url = ""
 model = "kokoro"
 voice = "af_bella"

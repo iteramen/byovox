@@ -15,6 +15,7 @@ pub const MAX_AUDIO: usize = 12 * 1024 * 1024;
 pub struct TtsConfig {
     pub enabled: bool,
     pub hotkey: String,
+    pub copy_fallback: bool,
     pub base_url: String,
     pub model: String,
     pub voice: String,
@@ -41,6 +42,7 @@ impl Default for TtsConfig {
         Self {
             enabled: false,
             hotkey: "ControlLeft+AltLeft+R".into(),
+            copy_fallback: true,
             base_url: String::new(),
             model: "kokoro".into(),
             voice: "af_bella".into(),

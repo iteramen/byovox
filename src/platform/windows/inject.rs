@@ -320,15 +320,30 @@ fn with_selection_automation<T>(
 }
 
 pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, String> {
-    with_selection_automation(|uia| selected_text_with_client(uia, expected_window))
+    with_selection_automation(|uia| selected_text_with_client(uia, expected_window, None))
+}
+
+pub(crate) fn narration_selection(
+    expected_window: isize,
+    copy_fallback: bool,
+    trigger: u32,
+    current: &(impl Fn() -> bool + Sync),
+) -> Result<Option<String>, String> {
+    super::selection_copy::wait_for_release(expected_window, trigger, current)?;
+    with_selection_automation(|uia| {
+        let copy = || super::selection_copy::selection(expected_window, current).map(Some);
+        selected_text_with_client(uia, expected_window, copy_fallback.then_some(&copy))
+    })
 }
 
 fn selected_text_with_client(
     uia: &IUIAutomation,
     expected_window: isize,
+    fallback: Option<&dyn Fn() -> Result<Option<String>, String>>,
 ) -> Result<Option<String>, String> {
     let deadline = Instant::now() + Duration::from_millis(1500);
-    // SAFETY: all interfaces belong to this apartment; no element/window is activated or modified.
+    // SAFETY: all interfaces belong to this apartment. UIA only reads; the separately
+    // guarded fallback may invoke Copy after the source/password/ambiguity checks.
     unsafe {
         let foreground = GetForegroundWindow();
         if foreground.is_invalid() || foreground.0 as isize != expected_window {
@@ -421,6 +436,9 @@ fn selected_text_with_client(
             return Err("Read aloud: the selected window changed; select again".into());
         }
         if !supported {
+            if let Some(copy) = fallback {
+                return copy();
+            }
             let role = focused
                 .CurrentControlType()
                 .map(|value| value.0)
@@ -429,7 +447,13 @@ fn selected_text_with_client(
                 "Read aloud: no selection state (focused role {role}, visible providers {count})"
             ));
         }
-        crate::read_aloud::unique_selection(selections)
+        let selected = crate::read_aloud::unique_selection(selections)?;
+        if selected.is_none()
+            && let Some(copy) = fallback
+        {
+            return copy();
+        }
+        Ok(selected)
     }
 }
 
