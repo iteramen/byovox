@@ -438,22 +438,12 @@ mod tests {
         assert!(unique_selection([Some("x".repeat(MAX_TEXT + 1))]).is_err());
     }
     #[test]
-    fn shared_dictation_shortcut_is_the_default_and_allows_legacy_bindings() {
-        let mut cfg = TtsConfig {
-            enabled: true,
-            base_url: "http://127.0.0.1/v1".into(),
-            ..Default::default()
-        };
-        for key in ["ControlRight", "ControlLeft+ShiftLeft+Z", "CapsLock+R"] {
-            assert!(cfg.shared_hotkey(key));
-            assert!(cfg.validate_hotkeys(key, "Escape").is_ok());
-        }
+    fn narration_defaults_to_a_separate_shortcut_and_refuses_the_same_chord() {
+        let mut cfg = TtsConfig { enabled: true, ..Default::default() };
+        assert_eq!(cfg.hotkey, "ControlLeft+AltLeft+R");
+        assert!(cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape").is_ok());
         cfg.hotkey = "ShiftLeft+ControlLeft+Z".into();
-        assert!(cfg.shared_hotkey("ControlLeft+ShiftLeft+Z"));
-        assert!(
-            cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape")
-                .is_ok()
-        );
+        assert!(cfg.validate_hotkeys("ControlLeft+ShiftLeft+Z", "Escape").is_err());
     }
     fn server(
         status: u16,
