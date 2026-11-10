@@ -249,3 +249,12 @@ model is in [SECURITY.md](../SECURITY.md).
 - Linux (Wayland and X11) and macOS backends for every platform trait, and their autostart.
 - Linux and macOS release archives; until then `cargo install --git` builds from source.
 - A per-lane `hosted` flag: `hosted` exists only on `[stt]` and `[polish]`.
+
+### Incomplete cleanup responses
+
+A nonempty cleanup reply is rejected when its first choice explicitly reports a
+finish_reason other than the string stop, including length, filtering, tool calls,
+null or malformed values. Existing failure handling retains the complete raw transcript
+and reports cleanup failure. Servers omitting finish_reason remain compatible; the client
+cannot detect truncation that a server does not report. The failure message contains no
+response text. The output token limit and prompt are unchanged.
