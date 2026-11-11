@@ -273,7 +273,7 @@ history and cloud synchronization can retain it; restoring the previous clipboar
 that. The original clipboard snapshot is held only in RAM, bounded to 64 supported formats/8 MiB.
 Unsupported clipboard formats refuse before Copy. Newer clipboard updates are never overwritten.
 
-This path never cuts, pastes or selects all. It rejects stale/foreign copies, password controls,
+This path never cuts, pastes or selects all. It rejects stale copies, password controls,
 unsupported terminals and source changes. Scintilla/Notepad++ empty selections are checked explicitly.
 Other apps can define Copy as current-line copying when nothing is selected: select the intended
 text before invoking narration. Cancellation prevents TTS but still attempts to restore any Copy
@@ -285,6 +285,11 @@ Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Inse
 binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
 refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
 Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
-running application when no selection exists. No fresh source-attributed clipboard result means no
+running application when no selection exists. No fresh clipboard result means no
 narration. Custom bindings and application handling of an unhandled chord remain source-app
 behavior; existing clipboard, source/focus and cancellation guards still apply.
+
+Automatic fresh Copy accepts helper-process and ownerless clipboard results when the source
+window and focused control remain unchanged. A fresh result is not proof of provenance: another
+app writing during the Copy interval cannot be excluded. This tradeoff was approved for broad
+app support. Restoration still refuses a changed clipboard sequence or observed owner.

@@ -16,9 +16,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, GA_ROOTOWNER, GUITHREADINFO, GWL_STYLE, GetAncestor,
-    GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowLongW, GetWindowThreadProcessId,
-    HWND_MESSAGE, SMTO_ABORTIFHUNG, SMTO_BLOCK, SendMessageTimeoutW, WINDOW_EX_STYLE, WINDOW_STYLE,
+    CreateWindowExW, DestroyWindow, GUITHREADINFO, GWL_STYLE, GetClassNameW, GetForegroundWindow,
+    GetGUIThreadInfo, GetWindowLongW, GetWindowThreadProcessId, HWND_MESSAGE, SMTO_ABORTIFHUNG,
+    SMTO_BLOCK, SendMessageTimeoutW, WINDOW_EX_STYLE, WINDOW_STYLE,
 };
 use windows::core::w;
 
@@ -208,12 +208,12 @@ fn owner_pid() -> Option<u32> {
     (pid != 0).then_some(pid)
 }
 
-fn may_restore(copied: u32, now: u32, owner: Option<u32>, source: u32) -> bool {
-    copied != 0 && copied == now && source != 0 && owner == Some(source)
+fn may_restore(copied: u32, now: u32, owner: Option<u32>, expected_owner: Option<u32>) -> bool {
+    copied != 0 && copied == now && owner == expected_owner
 }
 
-fn same_copy(before: u32, after: u32, owner: Option<u32>, source: u32) -> bool {
-    before != 0 && after != 0 && before != after && source != 0 && owner == Some(source)
+fn fresh_copy(before: u32, after: u32) -> bool {
+    before != 0 && after != 0 && before != after
 }
 
 fn decode_text(bytes: &[u8]) -> Result<String, String> {
@@ -251,23 +251,6 @@ fn class(window: HWND) -> String {
 enum CopyChord {
     Desktop,
     WindowsTerminal,
-}
-
-fn source_owns_clipboard(
-    chord: CopyChord,
-    source_pid: u32,
-    clipboard_pid: u32,
-    clipboard_class: &str,
-    source_window: isize,
-    owner_root: isize,
-) -> bool {
-    source_pid != 0
-        && clipboard_pid != 0
-        && (clipboard_pid == source_pid
-            || (chord == CopyChord::WindowsTerminal
-                && clipboard_class == "PseudoConsoleWindow"
-                && source_window != 0
-                && owner_root == source_window))
 }
 
 fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
@@ -387,8 +370,8 @@ fn restore(
     owner: HWND,
     saved: &mut [SavedFormat],
     copied: u32,
-    source: u32,
-    copied_owner: HWND,
+    copied_pid: Option<u32>,
+    copied_owner: Option<HWND>,
 ) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_millis(500);
     let _clipboard = loop {
@@ -401,12 +384,12 @@ fn restore(
         std::thread::sleep(Duration::from_millis(10));
     };
     // Check while locked: never overwrite a newer clipboard update.
-    if unsafe { GetClipboardOwner() }.ok() != Some(copied_owner)
+    if unsafe { GetClipboardOwner() }.ok() != copied_owner
         || !may_restore(
             copied,
             unsafe { GetClipboardSequenceNumber() },
             owner_pid(),
-            source,
+            copied_pid,
         )
     {
         return Err(
@@ -464,45 +447,12 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
             if after != before {
                 let clipboard_pid = owner_pid();
                 let clipboard_owner = unsafe { GetClipboardOwner() }.ok();
-                let clipboard_class = clipboard_owner.map(class).unwrap_or_default();
-                // A console application can perform Copy through its hidden console
-                // window. Accept this only for the Terminal route and an OS ownership
-                // chain rooted at the exact original Terminal HWND, never by name/PID
-                // ancestry alone. Another Terminal window remains unrelated.
-                let owner_root = clipboard_owner
-                    .map(|window| unsafe { GetAncestor(window, GA_ROOTOWNER) }.0 as isize)
-                    .unwrap_or_default();
-                let attributed = source_owns_clipboard(
-                    focus.chord,
-                    source,
-                    clipboard_pid.unwrap_or_default(),
-                    &clipboard_class,
-                    window,
-                    owner_root,
-                );
-                if !attributed
-                    || !same_copy(
-                        before,
-                        after,
-                        clipboard_pid,
-                        clipboard_pid.unwrap_or_default(),
-                    )
-                {
-                    // Attribution failures need enough metadata to distinguish a helper
-                    // process from a competing clipboard writer. Never include clipboard
-                    // contents, window titles, document names or executable paths.
-                    return Err(format!(
-                        "Read aloud: unrelated clipboard update; try again (route={:?}, source_pid={}, owner_pid={:?}, root_class={}, focus_class={}, owner_class={}, owner_root_matches={}, sequence={}->{})",
-                        focus.chord,
-                        source,
-                        clipboard_pid,
-                        class(target),
-                        class(focus.focus),
-                        clipboard_class,
-                        owner_root == window,
-                        before,
-                        after
-                    ));
+                // Owner-approved automatic Copy policy: freshness and unchanged source
+                // focus are the admission guards. Clipboard ownership is not provenance:
+                // legitimate helper/ownerless results occur. A concurrent writer remains
+                // a documented trust limitation. Never fall back to the pre-Copy text.
+                if !fresh_copy(before, after) {
+                    return Err("Read aloud: no fresh copied selection; try again".into());
                 }
                 let result = source_current(window, current)
                     .and_then(|()| sent.clone())
@@ -518,14 +468,11 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
                 // Delayed rendering can advance the sequence. Retain the final locked value.
                 let copied = unsafe { GetClipboardSequenceNumber() };
                 drop(_clipboard);
-                restore(
-                    owner.0,
-                    &mut saved,
-                    copied,
-                    clipboard_pid.unwrap_or_default(),
-                    clipboard_owner.unwrap_or_default(),
-                )?;
+                restore(owner.0, &mut saved, copied, clipboard_pid, clipboard_owner)?;
                 source_current(window, current)?;
+                if copy_target(target)? != focus {
+                    return Err("Read aloud: selected control changed".into());
+                }
                 return result;
             }
         }
@@ -539,73 +486,6 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn terminal_copy_accepts_only_console_owners_linked_to_original_window() {
-        assert!(source_owns_clipboard(
-            CopyChord::WindowsTerminal,
-            10,
-            20,
-            "PseudoConsoleWindow",
-            100,
-            100
-        ));
-        for (chord, source, owner, class, window, root) in [
-            (CopyChord::Desktop, 10, 20, "PseudoConsoleWindow", 100, 100),
-            (CopyChord::WindowsTerminal, 10, 20, "OtherWindow", 100, 100),
-            (
-                CopyChord::WindowsTerminal,
-                10,
-                20,
-                "PseudoConsoleWindow",
-                100,
-                200,
-            ),
-            (
-                CopyChord::WindowsTerminal,
-                10,
-                20,
-                "PseudoConsoleWindow",
-                100,
-                0,
-            ),
-            (
-                CopyChord::WindowsTerminal,
-                10,
-                20,
-                "PseudoConsoleWindow",
-                0,
-                0,
-            ),
-            (
-                CopyChord::WindowsTerminal,
-                10,
-                0,
-                "PseudoConsoleWindow",
-                100,
-                100,
-            ),
-            (
-                CopyChord::WindowsTerminal,
-                0,
-                20,
-                "PseudoConsoleWindow",
-                100,
-                100,
-            ),
-        ] {
-            assert!(!source_owns_clipboard(
-                chord, source, owner, class, window, root
-            ));
-        }
-        assert!(source_owns_clipboard(
-            CopyChord::Desktop,
-            10,
-            10,
-            "Edit",
-            100,
-            200
-        ));
-    }
     #[test]
     fn windows_terminal_uses_copy_insert_and_other_terminals_stay_refused() {
         assert_eq!(
@@ -688,44 +568,7 @@ mod tests {
             {
                 let owner = Owner::new().unwrap();
                 let source = GetCurrentProcessId();
-                // Exercise Windows' real ownership chain in the private desktop.
-                // None of these windows is shown; no interactive desktop is touched.
-                let terminal = Owner(
-                    CreateWindowExW(
-                        WINDOW_EX_STYLE(0),
-                        w!("STATIC"),
-                        w!(""),
-                        windows::Win32::UI::WindowsAndMessaging::WS_POPUP,
-                        0,
-                        0,
-                        0,
-                        0,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                    .unwrap(),
-                );
-                let console = Owner(
-                    CreateWindowExW(
-                        WINDOW_EX_STYLE(0),
-                        w!("STATIC"),
-                        w!(""),
-                        windows::Win32::UI::WindowsAndMessaging::WS_POPUP,
-                        0,
-                        0,
-                        0,
-                        0,
-                        Some(terminal.0),
-                        None,
-                        None,
-                        None,
-                    )
-                    .unwrap(),
-                );
-                assert_eq!(GetAncestor(console.0, GA_ROOTOWNER), terminal.0);
-                assert_ne!(GetAncestor(console.0, GA_ROOTOWNER), owner.0);
+                let other_owner = Owner::new().unwrap();
                 let html = RegisterClipboardFormatW(w!("HTML Format"));
                 let rtf = RegisterClipboardFormatW(w!("Rich Text Format"));
                 assert_ne!(html, 0);
@@ -751,14 +594,25 @@ mod tests {
                     GetClipboardSequenceNumber()
                 };
                 // Matching PID/sequence is not enough if the expected owner HWND differs.
-                assert!(restore(owner.0, &mut saved, copied, source, console.0).is_err());
-                restore(owner.0, &mut saved, copied, source, owner.0).unwrap_or_else(|e| {
-                    panic!(
-                        "{e}; copied={copied} now={} owner={:?} expected={source}",
-                        GetClipboardSequenceNumber(),
-                        owner_pid()
+                assert!(
+                    restore(
+                        owner.0,
+                        &mut saved,
+                        copied,
+                        Some(source),
+                        Some(other_owner.0)
                     )
-                });
+                    .is_err()
+                );
+                restore(owner.0, &mut saved, copied, Some(source), Some(owner.0)).unwrap_or_else(
+                    |e| {
+                        panic!(
+                            "{e}; copied={copied} now={} owner={:?} expected={source}",
+                            GetClipboardSequenceNumber(),
+                            owner_pid()
+                        )
+                    },
+                );
                 {
                     let _lock = Clipboard::open(owner.0).unwrap();
                     for (format, expected) in &originals {
@@ -766,8 +620,8 @@ mod tests {
                     }
                 }
                 // A valid fresh Copy can outlive its owner window. This reproduces
-                // the documented Windows limitation behind the live ownerless refusal;
-                // it does not change admission policy or inspect the user's clipboard.
+                // the documented Windows ownership limitation. The approved fresh-Copy
+                // policy must restore this result without touching the interactive clipboard.
                 let before_ownerless = GetClipboardSequenceNumber();
                 let mut before_ownerless_saved = {
                     let _lock = Clipboard::open(owner.0).unwrap();
@@ -794,8 +648,8 @@ mod tests {
                     owner.0,
                     &mut before_ownerless_saved,
                     GetClipboardSequenceNumber(),
-                    0,
-                    HWND::default(),
+                    None,
+                    None,
                 )
                 .unwrap();
                 {
@@ -803,6 +657,34 @@ mod tests {
                     for (format, expected) in &originals {
                         assert_eq!(&clipboard_bytes(*format, MAX_SNAPSHOT).unwrap(), expected);
                     }
+                }
+                // Two ownerless writes must still be distinguished by their sequence;
+                // an absent owner must never permit overwriting the newer result.
+                let mut saved_ownerless = {
+                    let _lock = Clipboard::open(owner.0).unwrap();
+                    snapshot().unwrap()
+                };
+                let mut first_ownerless = 0;
+                for text in ["first ownerless", "newer ownerless"] {
+                    let temporary_owner = Owner::new().unwrap();
+                    let _lock = Clipboard::open(temporary_owner.0).unwrap();
+                    EmptyClipboard().unwrap();
+                    set_fixture(UNICODE_TEXT, &bytes(text));
+                    drop(_lock);
+                    drop(temporary_owner);
+                    if first_ownerless == 0 {
+                        first_ownerless = GetClipboardSequenceNumber();
+                    }
+                }
+                assert!(
+                    restore(owner.0, &mut saved_ownerless, first_ownerless, None, None).is_err()
+                );
+                {
+                    let _lock = Clipboard::open(owner.0).unwrap();
+                    assert_eq!(
+                        decode_text(&clipboard_bytes(UNICODE_TEXT, 1000).unwrap()).unwrap(),
+                        "newer ownerless"
+                    );
                 }
                 // A newer source-owned write must not be overwritten even with the same PID.
                 let mut saved = {
@@ -821,7 +703,7 @@ mod tests {
                     EmptyClipboard().unwrap();
                     set_fixture(UNICODE_TEXT, &bytes("newer copy"));
                 }
-                assert!(restore(owner.0, &mut saved, copied, source, owner.0).is_err());
+                assert!(restore(owner.0, &mut saved, copied, Some(source), Some(owner.0)).is_err());
                 {
                     let _lock = Clipboard::open(owner.0).unwrap();
                     assert_eq!(
@@ -842,7 +724,7 @@ mod tests {
                     drop(_lock); // source Copy publishes synthesized formats on close
                     GetClipboardSequenceNumber()
                 };
-                restore(owner.0, &mut saved, copied, source, owner.0).unwrap();
+                restore(owner.0, &mut saved, copied, Some(source), Some(owner.0)).unwrap();
                 let _lock = Clipboard::open(owner.0).unwrap();
                 assert_eq!(EnumClipboardFormats(0), 0);
             }
@@ -866,21 +748,23 @@ mod tests {
     }
 
     #[test]
-    fn stale_missing_owner_and_foreign_copies_are_never_accepted() {
-        assert!(!same_copy(7, 7, Some(10), 10));
-        assert!(!same_copy(0, 8, Some(10), 10));
-        assert!(!same_copy(7, 0, Some(10), 10));
-        assert!(!same_copy(7, 8, None, 10));
-        assert!(!same_copy(7, 8, Some(11), 10));
-        assert!(same_copy(u32::MAX, 1, Some(10), 10));
+    fn admission_requires_new_nonzero_sequence_not_owner_identity() {
+        assert!(!fresh_copy(7, 7));
+        assert!(!fresh_copy(0, 8));
+        assert!(!fresh_copy(7, 0));
+        assert!(fresh_copy(7, 8));
+        assert!(fresh_copy(u32::MAX, 1));
     }
     #[test]
-    fn restoration_never_clobbers_a_newer_or_foreign_clipboard() {
-        assert!(may_restore(8, 8, Some(10), 10));
-        assert!(!may_restore(8, 9, Some(10), 10));
-        assert!(!may_restore(8, 8, Some(11), 10));
-        assert!(!may_restore(8, 8, None, 10));
-        assert!(!may_restore(0, 0, Some(10), 10));
+    fn restoration_pins_sequence_and_observed_owner_including_none() {
+        assert!(may_restore(8, 8, Some(10), Some(10)));
+        assert!(may_restore(8, 8, None, None));
+        assert!(!may_restore(8, 9, None, None));
+        assert!(!may_restore(8, 9, Some(10), Some(10)));
+        assert!(!may_restore(8, 8, Some(11), Some(10)));
+        assert!(!may_restore(8, 8, None, Some(10)));
+        assert!(!may_restore(8, 8, Some(10), None));
+        assert!(!may_restore(0, 0, None, None));
     }
 
     #[test]

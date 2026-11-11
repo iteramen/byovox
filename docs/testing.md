@@ -225,7 +225,7 @@ remains unresolved. The owner rejected Notepad-only acceptance and approved guar
 by default, with a UIA-only opt-out and documented clipboard-history tradeoff.
 
 Regression ad27ca7 failed before the default/opt-out field existed. Automated cases cover legacy
-configuration defaults, opt-out, stale/foreign/ownerless sequence refusal, restoration race guards,
+configuration defaults, opt-out, stale-sequence refusal, restoration race guards,
 clipboard handle format refusal, malformed/empty/oversized UTF-16. A native child-process test
 creates a private noninteractive window station/desktop and verifies plain text + HTML + RTF
 restoration, empty-clipboard restoration, and refusal to overwrite a newer same-owner update.
@@ -268,27 +268,26 @@ injection marker. Existing private-station clipboard regressions still apply.
 
 Reference: https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#copy
 
-### Terminal console clipboard attribution
+### Automatic fresh Copy acceptance
 
-The chat reproduction on 16c2e9c reported Windows Terminal as the foreground process and
-herdr.exe as clipboard owner, with class PseudoConsoleWindow. The old same-process check
-therefore rejected the copied result. Regression 7f1e16f fails that console-owner case.
-The repair accepts a different-process console owner only on the Terminal route and only when
-its OS root-owner chain reaches the original Terminal HWND. Null owners, unrelated roots,
-other window classes and desktop cross-process owners remain refused. Restoration also pins
-the exact owner HWND, in addition to its process and sequence.
+Chat checks on 16c2e9c and 101879c failed with helper-process and then ownerless clipboard
+results. The isolated private-desktop fixture proves valid copied text can outlive its owner
+window. It does not establish what removed the owner in the live chat.
 
-The private-desktop test checks real Windows owner-chain traversal and rejects restoration
-with a different owner HWND even when process/sequence match. Policy tests cover the accepted
-Terminal relationship and each refusal above. This does not prove the live chat relationship:
-the owner must repeat selected synthetic text narration, Stop and empty-selection checks.
+The owner approved automatic fresh Copy on 2026-11-11: require a changed nonzero sequence after
+our Copy request, unchanged foreground/focused control and a current generation, without a
+provenance requirement or preview. Stale clipboard text is never a fallback. Another app writing
+during that interval cannot be excluded. This replaces the attempted Terminal-owner exception.
 
-References: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getancestor
-and https://learn.microsoft.com/en-us/windows/console/getconsolewindow.
+Regression ae87b6f failed ownerless restoration before the repair. Private-desktop tests now
+cover ownerless Unicode Copy followed by restoration of the previous plain/HTML/RTF formats;
+a newer ownerless update is preserved and restoration refused. Existing same-owner/newer-update,
+owner-window mismatch, empty clipboard, format/size/UTF-16, and key-routing tests remain.
+No interactive clipboard is touched by these tests.
 
-The next live attempt on 101879c still refused: the sequence changed but GetClipboardOwner
-returned no owner. The private-desktop fixture now reproduces valid fresh Unicode data surviving
-destruction of its clipboard owner window. This demonstrates why ownership is not a universal
-Copy provenance mechanism; it does not establish what removed the owner in the live chat.
-Admission remains strict pending the owner's choice between automatic fresh-Copy admission,
-an unverified-text preview, or continued refusal. No native acceptance is claimed.
+- [ ] Actual chat: selected synthetic text speaks, and second press stops.
+- [ ] Actual chat: empty selection does not reuse stale clipboard text.
+- [ ] Notepad++ selected text and dictation remain working with separate shortcuts.
+- [ ] Cancel/focus switch before admission prevents narration.
+
+Reference: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboardowner.
