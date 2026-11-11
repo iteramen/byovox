@@ -145,7 +145,7 @@ generation before queuing synthesis. Stop/Disable/dictation invalidates generati
 both queues; late lookup results cannot revive narration. No shared-state lock is held across
 UIA calls. Unsupported-selection errors include only numeric control-role/provider-count metadata.
 
-Lookup inspects the focused control and visible foreground text-selection providers, bounded to 128 returned visible TextPattern providers and a 1.5-second budget checked between providers. Each platform call has a one-second timeout; multiple calls per provider mean this is not a hard total-time bound.
+Lookup inspects the focused control and visible foreground text-selection providers, with range inspection bounded to 128 visible TextPattern providers and a 1.5-second budget checked between providers. Each platform call has a one-second timeout; multiple calls per provider mean this is not a hard total-time bound.
 It never asks for an element name/value or document text. GetText is called only after selected
 range endpoints prove the range non-degenerate. Equal parent/child selections are deduplicated;
 different selected text is refused. Only providers advertising TextPattern are inspected; element names/values and document contents are not read. The source window is rechecked before a payload can reach TTS.
@@ -165,8 +165,12 @@ and dictation selection/target behavior are unchanged.
 
 `tts.copy_fallback` defaults to true, including existing TTS configurations. Set it false for
 UIA-only access. The explicit narration gesture first waits for key release and tries UIA.
-A missing/empty selection may use the focused app's Ctrl+C action. Password, ambiguity, UIA
-errors/limits and source changes do not fall through to Copy. Dictation never invokes this path.
+A missing/empty selection or a snapshot containing over 128 providers may use the focused app's
+Copy action. The provider-count fallback runs only after focused password/source checks, does not
+scan the oversized snapshot's ranges, and uses all existing Copy focus/freshness/cancellation
+guards. It does not claim to check selection ambiguity across that unscanned snapshot. With Copy
+opted out, the count limit still refuses. Passwords, observed ambiguity, UIA errors, scan timeouts
+and source changes do not fall through to Copy. Dictation never invokes this path.
 
 The Copy worker snapshots up to 64 supported HGLOBAL clipboard formats, at most 8 MiB, in RAM
 and preallocates restoration handles before sending anything. GDI/private handle formats and

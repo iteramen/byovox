@@ -263,7 +263,7 @@ late lookup, playback and UI results. No shared-state lock is held across select
 `selected_text_optional` checks the focused element and visible foreground TextPattern providers, addressing
 chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
 text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
-selections. A filtered UIA TextPattern-provider snapshot returns at most 128 visible providers with a 1.5-second budget checked between providers (not a hard total wall-clock bound); each platform call has a one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, limits or a window change refuse without a microphone fallback.
+selections. Range inspection of the filtered UIA TextPattern-provider snapshot is limited to 128 visible providers with a 1.5-second budget checked between providers (not a hard total wall-clock bound); each platform call has a one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, scan timeouts or a window change refuse without a microphone fallback. A snapshot with more than 128 providers uses guarded Copy when enabled, without iterating its ranges; Copy opt-out preserves the count-limit refusal.
 There is no value or whole-document fallback. Missing/empty UIA selection can use the
 owner-approved, default-on guarded Copy fallback (`tts.copy_fallback = false` opts out).
 

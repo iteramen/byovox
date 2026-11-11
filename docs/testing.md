@@ -291,3 +291,16 @@ No interactive clipboard is touched by these tests.
 - [ ] Cancel/focus switch before admission prevents narration.
 
 Reference: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboardowner.
+
+### Oversized WhatsApp selection snapshot
+
+Owner reported WhatsApp narration failing on 0674873; daemon status identified 961 visible
+TextPattern providers. The 128-provider guard stopped before Copy, so this was not a TTS error.
+Regression 94861f1 reproduces that count-limit refusal. The repair calls guarded Copy once for
+oversized snapshots after focused password/source checks, without raising the scan cap or
+inspecting those providers' selected ranges. Copy opt-out still refuses. Existing provider errors,
+observed ambiguity, passwords and scan timeouts remain errors.
+
+The regression checks the 128-provider boundary, the 961-provider Copy route, opt-out refusal,
+propagation of a Copy source-change error, and an empty Copy result. WhatsApp draft speech,
+Stop and empty-selection refusal still require native acceptance; no test message is sent.

@@ -460,8 +460,14 @@ fn provider_limit_fallback(
     count: i32,
     fallback: Option<&dyn Fn() -> Result<Option<String>, String>>,
 ) -> Result<Option<Option<String>>, String> {
-    let _ = fallback;
     if count > 128 {
+        // Large applications can expose hundreds of providers even for a selected
+        // draft. Do not enumerate their ranges or raise the bound. The focused
+        // password/source checks have already passed; Copy rechecks source/focus,
+        // cancellation and clipboard freshness before admitting any text.
+        if let Some(copy) = fallback {
+            return copy().map(Some);
+        }
         return Err(format!(
             "Read aloud: too many visible text selection providers ({count})"
         ));
