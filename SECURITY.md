@@ -188,7 +188,9 @@ failure can leave copied text behind; it produces no narration. Restoration fail
 
 The source app writes the clipboard, so byovox cannot retroactively exclude that data from
 clipboard managers, Windows history or cloud sync. Restoration is not erasure from those services.
-No clipboard state is written to disk or diagnostic logs. OS clipboard ownership and source-app
+No clipboard contents are written to disk or diagnostic logs. A refused ownership check reports
+only its Copy route, process IDs, window class names and clipboard sequence numbers in status;
+it does not include window titles, document names or executable paths. OS clipboard ownership and source-app
 Copy behavior are trust assumptions, not protection from a malicious same-user process.
 
 
