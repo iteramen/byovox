@@ -253,6 +253,18 @@ enum CopyChord {
     WindowsTerminal,
 }
 
+fn source_owns_clipboard(
+    chord: CopyChord,
+    source_pid: u32,
+    clipboard_pid: u32,
+    clipboard_class: &str,
+    source_window: isize,
+    owner_root: isize,
+) -> bool {
+    let _ = (chord, clipboard_class, source_window, owner_root);
+    source_pid != 0 && clipboard_pid == source_pid
+}
+
 fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
     if root.eq_ignore_ascii_case("CASCADIA_HOSTING_WINDOW_CLASS")
         || focused.eq_ignore_ascii_case("CASCADIA_HOSTING_WINDOW_CLASS")
@@ -487,6 +499,73 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn terminal_copy_accepts_only_console_owners_linked_to_original_window() {
+        assert!(source_owns_clipboard(
+            CopyChord::WindowsTerminal,
+            10,
+            20,
+            "PseudoConsoleWindow",
+            100,
+            100
+        ));
+        for (chord, source, owner, class, window, root) in [
+            (CopyChord::Desktop, 10, 20, "PseudoConsoleWindow", 100, 100),
+            (CopyChord::WindowsTerminal, 10, 20, "OtherWindow", 100, 100),
+            (
+                CopyChord::WindowsTerminal,
+                10,
+                20,
+                "PseudoConsoleWindow",
+                100,
+                200,
+            ),
+            (
+                CopyChord::WindowsTerminal,
+                10,
+                20,
+                "PseudoConsoleWindow",
+                100,
+                0,
+            ),
+            (
+                CopyChord::WindowsTerminal,
+                10,
+                20,
+                "PseudoConsoleWindow",
+                0,
+                0,
+            ),
+            (
+                CopyChord::WindowsTerminal,
+                10,
+                0,
+                "PseudoConsoleWindow",
+                100,
+                100,
+            ),
+            (
+                CopyChord::WindowsTerminal,
+                0,
+                20,
+                "PseudoConsoleWindow",
+                100,
+                100,
+            ),
+        ] {
+            assert!(!source_owns_clipboard(
+                chord, source, owner, class, window, root
+            ));
+        }
+        assert!(source_owns_clipboard(
+            CopyChord::Desktop,
+            10,
+            10,
+            "Edit",
+            100,
+            200
+        ));
+    }
     #[test]
     fn windows_terminal_uses_copy_insert_and_other_terminals_stay_refused() {
         assert_eq!(
