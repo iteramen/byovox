@@ -171,7 +171,12 @@ errors/limits and source changes do not fall through to Copy. Dictation never in
 The Copy worker snapshots up to 64 supported HGLOBAL clipboard formats, at most 8 MiB, in RAM
 and preallocates restoration handles before sending anything. GDI/private handle formats and
 unreadable/oversized formats refuse before Copy. It requires released modifiers, the original
-foreground window/control, and a new nonzero clipboard sequence owned by the source process.
+foreground window/control, and a new nonzero clipboard sequence after the Copy request.
+The owner approved automatic fresh Copy when Windows cannot establish clipboard provenance:
+helper-process and ownerless results are accepted without a preview. Foreground/focus and
+cancellation are checked before reading and again after restoration. Existing clipboard text is
+never used as a fallback. A competing application writing during the Copy interval cannot be
+excluded; fresh sequence plus unchanged focus is not proof that the text came from the selection.
 Only bounded, nonempty, valid UTF-16 is accepted. It never cuts, pastes or selects all. Unsupported
 terminal window classes and native password edit controls refuse. Scintilla's numeric
 SCI_GETSELECTIONEMPTY query refuses its current-line Copy behavior when nothing is selected.
@@ -179,7 +184,7 @@ Other applications define Copy semantics; a newly copied current line is not uni
 distinguishable from an intended selection. This is not a proof of universal selection identity.
 
 Before TTS, it restores the preallocated formats only while holding the clipboard lock and only
-if the copied sequence/owner is still current. A newer update is left untouched and narration
+if the copied sequence, owner process and exact owner window are still current. A newer update is left untouched and narration
 refuses. A partial SendInput failure still observes a possible Copy result for restoration.
 Cancellation/source changes prevent transmission but allow restoration of that Copy result.
 Copy observation uses a 1.2-second budget and restoration lock retries 500 ms; delayed clipboard
@@ -188,14 +193,17 @@ failure can leave copied text behind; it produces no narration. Restoration fail
 
 The source app writes the clipboard, so byovox cannot retroactively exclude that data from
 clipboard managers, Windows history or cloud sync. Restoration is not erasure from those services.
-No clipboard state is written to disk or diagnostic logs. OS clipboard ownership and source-app
-Copy behavior are trust assumptions, not protection from a malicious same-user process.
+No clipboard contents are written to disk or diagnostic logs. Clipboard ownership is retained
+only as part of the restoration race check, not as proof of provenance. Owner absence matches
+only owner absence; a changed process, owner window or sequence refuses restoration and TTS.
+Source-app Copy behavior and absence of a competing clipboard writer are trust assumptions,
+not protection from a malicious same-user process.
 
 
 Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
 binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
 refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
 Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
-running application when no selection exists. No fresh source-owned clipboard result means no
+running application when no selection exists. No fresh clipboard result means no
 narration. Custom bindings and application handling of an unhandled chord remain source-app
 behavior; existing clipboard, source/focus and cancellation guards still apply.

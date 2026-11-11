@@ -225,7 +225,7 @@ remains unresolved. The owner rejected Notepad-only acceptance and approved guar
 by default, with a UIA-only opt-out and documented clipboard-history tradeoff.
 
 Regression ad27ca7 failed before the default/opt-out field existed. Automated cases cover legacy
-configuration defaults, opt-out, stale/foreign/ownerless sequence refusal, restoration race guards,
+configuration defaults, opt-out, stale-sequence refusal, restoration race guards,
 clipboard handle format refusal, malformed/empty/oversized UTF-16. A native child-process test
 creates a private noninteractive window station/desktop and verifies plain text + HTML + RTF
 restoration, empty-clipboard restoration, and refusal to overwrite a newer same-owner update.
@@ -267,3 +267,27 @@ injection marker. Existing private-station clipboard regressions still apply.
 - [ ] Notepad++ remains working with its existing desktop Copy route.
 
 Reference: https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#copy
+
+### Automatic fresh Copy acceptance
+
+Chat checks on 16c2e9c and 101879c failed with helper-process and then ownerless clipboard
+results. The isolated private-desktop fixture proves valid copied text can outlive its owner
+window. It does not establish what removed the owner in the live chat.
+
+The owner approved automatic fresh Copy on 2026-11-11: require a changed nonzero sequence after
+our Copy request, unchanged foreground/focused control and a current generation, without a
+provenance requirement or preview. Stale clipboard text is never a fallback. Another app writing
+during that interval cannot be excluded. This replaces the attempted Terminal-owner exception.
+
+Regression ae87b6f failed ownerless restoration before the repair. Private-desktop tests now
+cover ownerless Unicode Copy followed by restoration of the previous plain/HTML/RTF formats;
+a newer ownerless update is preserved and restoration refused. Existing same-owner/newer-update,
+owner-window mismatch, empty clipboard, format/size/UTF-16, and key-routing tests remain.
+No interactive clipboard is touched by these tests.
+
+- [ ] Actual chat: selected synthetic text speaks, and second press stops.
+- [ ] Actual chat: empty selection does not reuse stale clipboard text.
+- [ ] Notepad++ selected text and dictation remain working with separate shortcuts.
+- [ ] Cancel/focus switch before admission prevents narration.
+
+Reference: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboardowner.
