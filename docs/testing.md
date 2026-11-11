@@ -285,3 +285,10 @@ the owner must repeat selected synthetic text narration, Stop and empty-selectio
 
 References: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getancestor
 and https://learn.microsoft.com/en-us/windows/console/getconsolewindow.
+
+The next live attempt on 101879c still refused: the sequence changed but GetClipboardOwner
+returned no owner. The private-desktop fixture now reproduces valid fresh Unicode data surviving
+destruction of its clipboard owner window. This demonstrates why ownership is not a universal
+Copy provenance mechanism; it does not establish what removed the owner in the live chat.
+Admission remains strict pending the owner's choice between automatic fresh-Copy admission,
+an unverified-text preview, or continued refusal. No native acceptance is claimed.

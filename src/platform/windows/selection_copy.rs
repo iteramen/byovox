@@ -765,6 +765,27 @@ mod tests {
                         assert_eq!(&clipboard_bytes(*format, MAX_SNAPSHOT).unwrap(), expected);
                     }
                 }
+                // A valid fresh Copy can outlive its owner window. This reproduces
+                // the documented Windows limitation behind the live ownerless refusal;
+                // it does not change admission policy or inspect the user's clipboard.
+                let before_ownerless = GetClipboardSequenceNumber();
+                {
+                    let temporary_owner = Owner::new().unwrap();
+                    let _lock = Clipboard::open(temporary_owner.0).unwrap();
+                    EmptyClipboard().unwrap();
+                    set_fixture(UNICODE_TEXT, &bytes("fresh ownerless fixture"));
+                    drop(_lock);
+                    drop(temporary_owner);
+                }
+                {
+                    let _lock = Clipboard::open(owner.0).unwrap();
+                    assert!(GetClipboardOwner().is_err());
+                    assert_ne!(GetClipboardSequenceNumber(), before_ownerless);
+                    assert_eq!(
+                        decode_text(&clipboard_bytes(UNICODE_TEXT, 1000).unwrap()).unwrap(),
+                        "fresh ownerless fixture"
+                    );
+                }
                 // A newer source-owned write must not be overwritten even with the same PID.
                 let mut saved = {
                     let _lock = Clipboard::open(owner.0).unwrap();
