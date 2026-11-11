@@ -285,6 +285,6 @@ Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Inse
 binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
 refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
 Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
-running application when no selection exists. No fresh source-owned clipboard result means no
+running application when no selection exists. No fresh source-attributed clipboard result means no
 narration. Custom bindings and application handling of an unhandled chord remain source-app
 behavior; existing clipboard, source/focus and cancellation guards still apply.

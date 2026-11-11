@@ -267,3 +267,21 @@ injection marker. Existing private-station clipboard regressions still apply.
 - [ ] Notepad++ remains working with its existing desktop Copy route.
 
 Reference: https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#copy
+
+### Terminal console clipboard attribution
+
+The chat reproduction on 16c2e9c reported Windows Terminal as the foreground process and
+herdr.exe as clipboard owner, with class PseudoConsoleWindow. The old same-process check
+therefore rejected the copied result. Regression 7f1e16f fails that console-owner case.
+The repair accepts a different-process console owner only on the Terminal route and only when
+its OS root-owner chain reaches the original Terminal HWND. Null owners, unrelated roots,
+other window classes and desktop cross-process owners remain refused. Restoration also pins
+the exact owner HWND, in addition to its process and sequence.
+
+The private-desktop test checks real Windows owner-chain traversal and rejects restoration
+with a different owner HWND even when process/sequence match. Policy tests cover the accepted
+Terminal relationship and each refusal above. This does not prove the live chat relationship:
+the owner must repeat selected synthetic text narration, Stop and empty-selection checks.
+
+References: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getancestor
+and https://learn.microsoft.com/en-us/windows/console/getconsolewindow.

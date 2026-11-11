@@ -16,9 +16,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, GUITHREADINFO, GWL_STYLE, GetClassNameW, GetForegroundWindow,
-    GetGUIThreadInfo, GetWindowLongW, GetWindowThreadProcessId, HWND_MESSAGE, SMTO_ABORTIFHUNG,
-    SMTO_BLOCK, SendMessageTimeoutW, WINDOW_EX_STYLE, WINDOW_STYLE,
+    CreateWindowExW, DestroyWindow, GA_ROOTOWNER, GUITHREADINFO, GWL_STYLE, GetAncestor,
+    GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowLongW, GetWindowThreadProcessId,
+    HWND_MESSAGE, SMTO_ABORTIFHUNG, SMTO_BLOCK, SendMessageTimeoutW, WINDOW_EX_STYLE, WINDOW_STYLE,
 };
 use windows::core::w;
 
@@ -261,8 +261,13 @@ fn source_owns_clipboard(
     source_window: isize,
     owner_root: isize,
 ) -> bool {
-    let _ = (chord, clipboard_class, source_window, owner_root);
-    source_pid != 0 && clipboard_pid == source_pid
+    source_pid != 0
+        && clipboard_pid != 0
+        && (clipboard_pid == source_pid
+            || (chord == CopyChord::WindowsTerminal
+                && clipboard_class == "PseudoConsoleWindow"
+                && source_window != 0
+                && owner_root == source_window))
 }
 
 fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
@@ -378,7 +383,13 @@ fn send_copy(chord: CopyChord) -> Result<(), String> {
     Ok(())
 }
 
-fn restore(owner: HWND, saved: &mut [SavedFormat], copied: u32, source: u32) -> Result<(), String> {
+fn restore(
+    owner: HWND,
+    saved: &mut [SavedFormat],
+    copied: u32,
+    source: u32,
+    copied_owner: HWND,
+) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_millis(500);
     let _clipboard = loop {
         if let Ok(open) = Clipboard::open(owner) {
@@ -390,12 +401,14 @@ fn restore(owner: HWND, saved: &mut [SavedFormat], copied: u32, source: u32) -> 
         std::thread::sleep(Duration::from_millis(10));
     };
     // Check while locked: never overwrite a newer clipboard update.
-    if !may_restore(
-        copied,
-        unsafe { GetClipboardSequenceNumber() },
-        owner_pid(),
-        source,
-    ) {
+    if unsafe { GetClipboardOwner() }.ok() != Some(copied_owner)
+        || !may_restore(
+            copied,
+            unsafe { GetClipboardSequenceNumber() },
+            owner_pid(),
+            source,
+        )
+    {
         return Err(
             "Read aloud: clipboard changed again; left the newer contents untouched".into(),
         );
@@ -450,22 +463,43 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
             let after = unsafe { GetClipboardSequenceNumber() };
             if after != before {
                 let clipboard_pid = owner_pid();
-                if !same_copy(before, after, clipboard_pid, source) {
+                let clipboard_owner = unsafe { GetClipboardOwner() }.ok();
+                let clipboard_class = clipboard_owner.map(class).unwrap_or_default();
+                // A console application can perform Copy through its hidden console
+                // window. Accept this only for the Terminal route and an OS ownership
+                // chain rooted at the exact original Terminal HWND, never by name/PID
+                // ancestry alone. Another Terminal window remains unrelated.
+                let owner_root = clipboard_owner
+                    .map(|window| unsafe { GetAncestor(window, GA_ROOTOWNER) }.0 as isize)
+                    .unwrap_or_default();
+                let attributed = source_owns_clipboard(
+                    focus.chord,
+                    source,
+                    clipboard_pid.unwrap_or_default(),
+                    &clipboard_class,
+                    window,
+                    owner_root,
+                );
+                if !attributed
+                    || !same_copy(
+                        before,
+                        after,
+                        clipboard_pid,
+                        clipboard_pid.unwrap_or_default(),
+                    )
+                {
                     // Attribution failures need enough metadata to distinguish a helper
                     // process from a competing clipboard writer. Never include clipboard
                     // contents, window titles, document names or executable paths.
-                    let clipboard_class = unsafe { GetClipboardOwner() }
-                        .ok()
-                        .map(class)
-                        .unwrap_or_default();
                     return Err(format!(
-                        "Read aloud: unrelated clipboard update; try again (route={:?}, source_pid={}, owner_pid={:?}, root_class={}, focus_class={}, owner_class={}, sequence={}->{})",
+                        "Read aloud: unrelated clipboard update; try again (route={:?}, source_pid={}, owner_pid={:?}, root_class={}, focus_class={}, owner_class={}, owner_root_matches={}, sequence={}->{})",
                         focus.chord,
                         source,
                         clipboard_pid,
                         class(target),
                         class(focus.focus),
                         clipboard_class,
+                        owner_root == window,
                         before,
                         after
                     ));
@@ -484,7 +518,13 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
                 // Delayed rendering can advance the sequence. Retain the final locked value.
                 let copied = unsafe { GetClipboardSequenceNumber() };
                 drop(_clipboard);
-                restore(owner.0, &mut saved, copied, source)?;
+                restore(
+                    owner.0,
+                    &mut saved,
+                    copied,
+                    clipboard_pid.unwrap_or_default(),
+                    clipboard_owner.unwrap_or_default(),
+                )?;
                 source_current(window, current)?;
                 return result;
             }
@@ -648,6 +688,44 @@ mod tests {
             {
                 let owner = Owner::new().unwrap();
                 let source = GetCurrentProcessId();
+                // Exercise Windows' real ownership chain in the private desktop.
+                // None of these windows is shown; no interactive desktop is touched.
+                let terminal = Owner(
+                    CreateWindowExW(
+                        WINDOW_EX_STYLE(0),
+                        w!("STATIC"),
+                        w!(""),
+                        windows::Win32::UI::WindowsAndMessaging::WS_POPUP,
+                        0,
+                        0,
+                        0,
+                        0,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap(),
+                );
+                let console = Owner(
+                    CreateWindowExW(
+                        WINDOW_EX_STYLE(0),
+                        w!("STATIC"),
+                        w!(""),
+                        windows::Win32::UI::WindowsAndMessaging::WS_POPUP,
+                        0,
+                        0,
+                        0,
+                        0,
+                        Some(terminal.0),
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap(),
+                );
+                assert_eq!(GetAncestor(console.0, GA_ROOTOWNER), terminal.0);
+                assert_ne!(GetAncestor(console.0, GA_ROOTOWNER), owner.0);
                 let html = RegisterClipboardFormatW(w!("HTML Format"));
                 let rtf = RegisterClipboardFormatW(w!("Rich Text Format"));
                 assert_ne!(html, 0);
@@ -672,7 +750,9 @@ mod tests {
                     drop(_lock); // source Copy publishes synthesized formats on close
                     GetClipboardSequenceNumber()
                 };
-                restore(owner.0, &mut saved, copied, source).unwrap_or_else(|e| {
+                // Matching PID/sequence is not enough if the expected owner HWND differs.
+                assert!(restore(owner.0, &mut saved, copied, source, console.0).is_err());
+                restore(owner.0, &mut saved, copied, source, owner.0).unwrap_or_else(|e| {
                     panic!(
                         "{e}; copied={copied} now={} owner={:?} expected={source}",
                         GetClipboardSequenceNumber(),
@@ -702,7 +782,7 @@ mod tests {
                     EmptyClipboard().unwrap();
                     set_fixture(UNICODE_TEXT, &bytes("newer copy"));
                 }
-                assert!(restore(owner.0, &mut saved, copied, source).is_err());
+                assert!(restore(owner.0, &mut saved, copied, source, owner.0).is_err());
                 {
                     let _lock = Clipboard::open(owner.0).unwrap();
                     assert_eq!(
@@ -723,7 +803,7 @@ mod tests {
                     drop(_lock); // source Copy publishes synthesized formats on close
                     GetClipboardSequenceNumber()
                 };
-                restore(owner.0, &mut saved, copied, source).unwrap();
+                restore(owner.0, &mut saved, copied, source, owner.0).unwrap();
                 let _lock = Clipboard::open(owner.0).unwrap();
                 assert_eq!(EnumClipboardFormats(0), 0);
             }
