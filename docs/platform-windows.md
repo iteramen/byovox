@@ -433,6 +433,15 @@ and dictation selection/target behavior are unchanged.
 Copy fallback is Windows-only and independent of dictation. It preserves supported clipboard
 formats in RAM, rejects stale/foreign contents, checks foreground/focus and cancellation, and
 restores only its own unchanged Copy result. Scintilla editors must expose a nonempty numeric
-selection state; known terminal window classes refuse. Other applications define their Copy
+selection state; unsupported terminal window classes refuse. Other applications define their Copy
 behavior. Clipboard history/managers/sync can observe the temporary data. Detailed boundaries
 and opt-out are in SECURITY.md and privacy.md; qualification is per application, not universal.
+
+
+Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
+binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
+refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
+Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
+running application when no selection exists. No fresh source-owned clipboard result means no
+narration. Custom bindings and application handling of an unhandled chord remain source-app
+behavior; existing clipboard, source/focus and cancellation guards still apply.

@@ -12,8 +12,8 @@ use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
-    VIRTUAL_KEY,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GUITHREADINFO, GWL_STYLE, GetClassNameW, GetForegroundWindow,
@@ -48,9 +48,9 @@ pub(super) fn wait_for_release(
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         source_current(window, current)?;
-        // Include either side of Ctrl/Alt/Shift/Win, the trigger and C. Never synthesize
+        // Include either side of Ctrl/Alt/Shift/Win, the trigger, C and Insert. Never synthesize
         // releases for keys the user is holding, or turn Ctrl+C into Ctrl+Alt+C.
-        let held = [0x11, 0x12, 0x10, 0x5b, 0x5c, 0x43, trigger]
+        let held = [0x11, 0x12, 0x10, 0x5b, 0x5c, 0x43, 0x2d, trigger]
             .into_iter()
             .any(|key| unsafe { GetAsyncKeyState(key as i32) } as u16 & 0x8000 != 0);
         if !held {
@@ -247,7 +247,35 @@ fn class(window: HWND) -> String {
     String::from_utf16_lossy(&name[..count.max(0) as usize])
 }
 
-fn copy_target(window: HWND) -> Result<HWND, String> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyChord {
+    Desktop,
+    WindowsTerminal,
+}
+
+fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
+    if root.eq_ignore_ascii_case("CASCADIA_HOSTING_WINDOW_CLASS")
+        || focused.eq_ignore_ascii_case("CASCADIA_HOSTING_WINDOW_CLASS")
+    {
+        return Some(CopyChord::WindowsTerminal);
+    }
+    if ["ConsoleWindowClass", "mintty", "VirtualConsoleClass"]
+        .iter()
+        .any(|name| root.eq_ignore_ascii_case(name) || focused.eq_ignore_ascii_case(name))
+    {
+        None
+    } else {
+        Some(CopyChord::Desktop)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CopyTarget {
+    focus: HWND,
+    chord: CopyChord,
+}
+
+fn copy_target(window: HWND) -> Result<CopyTarget, String> {
     let mut info = GUITHREADINFO {
         cbSize: size_of::<GUITHREADINFO>() as u32,
         ..Default::default()
@@ -261,17 +289,9 @@ fn copy_target(window: HWND) -> Result<HWND, String> {
     }
     let root_class = class(window);
     let focused_class = class(info.hwndFocus);
-    if [
-        "ConsoleWindowClass",
-        "CASCADIA_HOSTING_WINDOW_CLASS",
-        "mintty",
-        "VirtualConsoleClass",
-    ]
-    .iter()
-    .any(|name| root_class.eq_ignore_ascii_case(name) || focused_class.eq_ignore_ascii_case(name))
-    {
-        return Err("Read aloud: Copy fallback is unavailable in terminals".into());
-    }
+    let chord = copy_chord(&root_class, &focused_class).ok_or(
+        "Read aloud: Copy fallback is unavailable in this terminal; Windows Terminal is supported",
+    )?;
     // UIA password checks precede this path; additionally guard native EDIT controls.
     if focused_class.eq_ignore_ascii_case("Edit")
         && unsafe { GetWindowLongW(info.hwndFocus, GWL_STYLE) } & 0x20 != 0
@@ -297,29 +317,44 @@ fn copy_target(window: HWND) -> Result<HWND, String> {
             return Err("Read aloud: select text first".into());
         }
     }
-    Ok(info.hwndFocus)
+    Ok(CopyTarget {
+        focus: info.hwndFocus,
+        chord,
+    })
 }
 
-fn send_copy() -> Result<(), String> {
-    let events: Vec<INPUT> = [(0x11, false), (0x43, false), (0x43, true), (0x11, true)]
+fn copy_inputs(chord: CopyChord) -> Vec<INPUT> {
+    let key = match chord {
+        CopyChord::Desktop => 0x43,
+        CopyChord::WindowsTerminal => 0x2d,
+    };
+    [(0x11, false), (key, false), (key, true), (0x11, true)]
         .into_iter()
         .map(|(vk, up)| INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
                     wVk: VIRTUAL_KEY(vk),
-                    dwFlags: if up {
+                    dwFlags: (if up {
                         KEYEVENTF_KEYUP
                     } else {
                         Default::default()
-                    },
+                    }) | (if vk == 0x2d {
+                        KEYEVENTF_EXTENDEDKEY
+                    } else {
+                        Default::default()
+                    }),
                     dwExtraInfo: INJECT_MARKER,
                     ..Default::default()
                 },
             },
         })
-        .collect();
-    // SAFETY: one contiguous, balanced Ctrl+C batch. No paste/cut/Enter events.
+        .collect()
+}
+
+fn send_copy(chord: CopyChord) -> Result<(), String> {
+    let events = copy_inputs(chord);
+    // SAFETY: one balanced Ctrl+C (desktop) or Ctrl+Insert (Windows Terminal) batch. No paste/cut/Enter events.
     let sent = unsafe { SendInput(&events, size_of::<INPUT>() as i32) };
     if sent != events.len() as u32 {
         if sent > 0 {
@@ -394,7 +429,7 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
     if unsafe { GetClipboardSequenceNumber() } != before {
         return Err("Read aloud: clipboard changed; try again".into());
     }
-    let sent = send_copy();
+    let sent = send_copy(focus.chord);
     let deadline = Instant::now() + COPY_WAIT;
     loop {
         // Even after cancellation, observe the Copy result long enough to restore it.
@@ -434,6 +469,51 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn windows_terminal_uses_copy_insert_and_other_terminals_stay_refused() {
+        assert_eq!(
+            copy_chord(
+                "CASCADIA_HOSTING_WINDOW_CLASS",
+                "Windows.UI.Input.InputSite.WindowClass"
+            ),
+            Some(CopyChord::WindowsTerminal)
+        );
+        assert_eq!(
+            copy_chord("other", "cascadia_hosting_window_class"),
+            Some(CopyChord::WindowsTerminal)
+        );
+        for name in ["ConsoleWindowClass", "mintty", "VirtualConsoleClass"] {
+            assert_eq!(copy_chord(name, "child"), None);
+            assert_eq!(copy_chord("root", name), None);
+        }
+        assert_eq!(
+            copy_chord("Notepad++", "Scintilla"),
+            Some(CopyChord::Desktop)
+        );
+    }
+    #[test]
+    fn terminal_copy_never_sends_c_enter_or_paste_keys() {
+        let inputs = copy_inputs(CopyChord::WindowsTerminal);
+        let keys: Vec<_> = inputs
+            .iter()
+            .map(|input| {
+                // SAFETY: copy_inputs writes the keyboard arm for every event.
+                let key = unsafe { input.Anonymous.ki };
+                assert_eq!(key.dwExtraInfo, INJECT_MARKER);
+                (key.wVk.0, key.dwFlags)
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                (0x11, Default::default()),
+                (0x2d, KEYEVENTF_EXTENDEDKEY),
+                (0x2d, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP),
+                (0x11, KEYEVENTF_KEYUP)
+            ]
+        );
+    }
+
     #[test]
     fn clipboard_round_trip_in_private_station() {
         // A child owns a private, noninteractive window station/desktop. These tests

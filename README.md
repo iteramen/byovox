@@ -256,7 +256,16 @@ by dominant script per chunk, not semantic language detection: Latin-script text
 
 Copy fallback waits for shortcut release, preserves supported clipboard formats and restores
 only if no newer clipboard update has arrived. It refuses unsupported/oversized clipboard snapshots,
-password fields, known terminal windows, stale/foreign updates and changed foreground controls.
+password fields, unsupported terminal windows, stale/foreign updates and changed foreground controls.
 Select text first: applications define Copy behavior, and some copy a current line without a
 selection. Scintilla editors such as Notepad++ are explicitly checked for an empty selection.
 Support is app-dependent; the current qualification matrix is in [docs/testing.md](docs/testing.md).
+
+
+Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
+binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
+refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
+Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
+running application when no selection exists. No fresh source-owned clipboard result means no
+narration. Custom bindings and application handling of an unhandled chord remain source-app
+behavior; existing clipboard, source/focus and cancellation guards still apply.

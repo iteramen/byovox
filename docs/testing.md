@@ -246,3 +246,24 @@ Native checklist (synthetic text only, do not use ordinary chats/documents):
 - [ ] copy_fallback=false restores UIA-only behavior. No selected text/clipboard payload in logs.
 
 No numerical coverage claim or feature acceptance until these real-app results are recorded.
+
+
+### Windows Terminal Copy follow-up
+
+Owner reports Notepad++ speech works on 55acb02. This chat failed with the explicit terminal
+refusal, before any Copy or TTS. The installed Windows Terminal settings have no Ctrl+Insert
+override. Its documented default is Copy; with no selection it forwards the chord, which is why
+this repair does not merely enable Ctrl+C/Ctrl+Shift+C for terminal windows.
+
+Regression 9bdb155 demonstrated both the old terminal refusal and incorrect Ctrl+C key sequence.
+Routing now uses Ctrl+Insert only for Windows Terminal's recognized class and refuses other known
+terminal classes. Tests pin exact virtual keys, extended Insert flags, balanced releases and the
+injection marker. Existing private-station clipboard regressions still apply.
+
+- [ ] Windows Terminal synthetic selected paragraph: narration starts and second press stops.
+- [ ] Empty terminal selection: no narration, no Ctrl+C interruption or Enter/submission.
+- [ ] Existing terminal Copy shortcut still works; no paste; prior clipboard restored.
+- [ ] Actual chat selected synthetic sentence works without disrupting its session.
+- [ ] Notepad++ remains working with its existing desktop Copy route.
+
+Reference: https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#copy

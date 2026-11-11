@@ -172,7 +172,7 @@ The Copy worker snapshots up to 64 supported HGLOBAL clipboard formats, at most 
 and preallocates restoration handles before sending anything. GDI/private handle formats and
 unreadable/oversized formats refuse before Copy. It requires released modifiers, the original
 foreground window/control, and a new nonzero clipboard sequence owned by the source process.
-Only bounded, nonempty, valid UTF-16 is accepted. It never cuts, pastes or selects all. Known
+Only bounded, nonempty, valid UTF-16 is accepted. It never cuts, pastes or selects all. Unsupported
 terminal window classes and native password edit controls refuse. Scintilla's numeric
 SCI_GETSELECTIONEMPTY query refuses its current-line Copy behavior when nothing is selected.
 Other applications define Copy semantics; a newly copied current line is not universally
@@ -190,3 +190,12 @@ The source app writes the clipboard, so byovox cannot retroactively exclude that
 clipboard managers, Windows history or cloud sync. Restoration is not erasure from those services.
 No clipboard state is written to disk or diagnostic logs. OS clipboard ownership and source-app
 Copy behavior are trust assumptions, not protection from a malicious same-user process.
+
+
+Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
+binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
+refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
+Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
+running application when no selection exists. No fresh source-owned clipboard result means no
+narration. Custom bindings and application handling of an unhandled chord remain source-app
+behavior; existing clipboard, source/focus and cancellation guards still apply.
