@@ -437,8 +437,26 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
         if let Ok(_clipboard) = Clipboard::open(owner.0) {
             let after = unsafe { GetClipboardSequenceNumber() };
             if after != before {
-                if !same_copy(before, after, owner_pid(), source) {
-                    return Err("Read aloud: unrelated clipboard update; try again".into());
+                let clipboard_pid = owner_pid();
+                if !same_copy(before, after, clipboard_pid, source) {
+                    // Attribution failures need enough metadata to distinguish a helper
+                    // process from a competing clipboard writer. Never include clipboard
+                    // contents, window titles, document names or executable paths.
+                    let clipboard_class = unsafe { GetClipboardOwner() }
+                        .ok()
+                        .map(class)
+                        .unwrap_or_default();
+                    return Err(format!(
+                        "Read aloud: unrelated clipboard update; try again (route={:?}, source_pid={}, owner_pid={:?}, root_class={}, focus_class={}, owner_class={}, sequence={}->{})",
+                        focus.chord,
+                        source,
+                        clipboard_pid,
+                        class(target),
+                        class(focus.focus),
+                        clipboard_class,
+                        before,
+                        after
+                    ));
                 }
                 let result = source_current(window, current)
                     .and_then(|()| sent.clone())
