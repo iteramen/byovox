@@ -247,6 +247,28 @@ fn class(window: HWND) -> String {
     String::from_utf16_lossy(&name[..count.max(0) as usize])
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyChord {
+    Desktop,
+    WindowsTerminal,
+}
+
+fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
+    if [
+        "ConsoleWindowClass",
+        "CASCADIA_HOSTING_WINDOW_CLASS",
+        "mintty",
+        "VirtualConsoleClass",
+    ]
+    .iter()
+    .any(|name| root.eq_ignore_ascii_case(name) || focused.eq_ignore_ascii_case(name))
+    {
+        None
+    } else {
+        Some(CopyChord::Desktop)
+    }
+}
+
 fn copy_target(window: HWND) -> Result<HWND, String> {
     let mut info = GUITHREADINFO {
         cbSize: size_of::<GUITHREADINFO>() as u32,
@@ -261,15 +283,7 @@ fn copy_target(window: HWND) -> Result<HWND, String> {
     }
     let root_class = class(window);
     let focused_class = class(info.hwndFocus);
-    if [
-        "ConsoleWindowClass",
-        "CASCADIA_HOSTING_WINDOW_CLASS",
-        "mintty",
-        "VirtualConsoleClass",
-    ]
-    .iter()
-    .any(|name| root_class.eq_ignore_ascii_case(name) || focused_class.eq_ignore_ascii_case(name))
-    {
+    if copy_chord(&root_class, &focused_class).is_none() {
         return Err("Read aloud: Copy fallback is unavailable in terminals".into());
     }
     // UIA password checks precede this path; additionally guard native EDIT controls.
@@ -300,8 +314,8 @@ fn copy_target(window: HWND) -> Result<HWND, String> {
     Ok(info.hwndFocus)
 }
 
-fn send_copy() -> Result<(), String> {
-    let events: Vec<INPUT> = [(0x11, false), (0x43, false), (0x43, true), (0x11, true)]
+fn copy_inputs(_chord: CopyChord) -> Vec<INPUT> {
+    [(0x11, false), (0x43, false), (0x43, true), (0x11, true)]
         .into_iter()
         .map(|(vk, up)| INPUT {
             r#type: INPUT_KEYBOARD,
@@ -318,7 +332,11 @@ fn send_copy() -> Result<(), String> {
                 },
             },
         })
-        .collect();
+        .collect()
+}
+
+fn send_copy() -> Result<(), String> {
+    let events = copy_inputs(CopyChord::Desktop);
     // SAFETY: one contiguous, balanced Ctrl+C batch. No paste/cut/Enter events.
     let sent = unsafe { SendInput(&events, size_of::<INPUT>() as i32) };
     if sent != events.len() as u32 {
@@ -434,6 +452,51 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn windows_terminal_uses_copy_insert_and_other_terminals_stay_refused() {
+        assert_eq!(
+            copy_chord(
+                "CASCADIA_HOSTING_WINDOW_CLASS",
+                "Windows.UI.Input.InputSite.WindowClass"
+            ),
+            Some(CopyChord::WindowsTerminal)
+        );
+        assert_eq!(
+            copy_chord("other", "cascadia_hosting_window_class"),
+            Some(CopyChord::WindowsTerminal)
+        );
+        for name in ["ConsoleWindowClass", "mintty", "VirtualConsoleClass"] {
+            assert_eq!(copy_chord(name, "child"), None);
+            assert_eq!(copy_chord("root", name), None);
+        }
+        assert_eq!(
+            copy_chord("Notepad++", "Scintilla"),
+            Some(CopyChord::Desktop)
+        );
+    }
+    #[test]
+    fn terminal_copy_never_sends_c_enter_or_paste_keys() {
+        let inputs = copy_inputs(CopyChord::WindowsTerminal);
+        let keys: Vec<_> = inputs
+            .iter()
+            .map(|input| {
+                // SAFETY: copy_inputs writes the keyboard arm for every event.
+                let key = unsafe { input.Anonymous.ki };
+                assert_eq!(key.dwExtraInfo, INJECT_MARKER);
+                (key.wVk.0, key.dwFlags)
+            })
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                (0x11, Default::default()),
+                (0x2d, Default::default()),
+                (0x2d, KEYEVENTF_KEYUP),
+                (0x11, KEYEVENTF_KEYUP)
+            ]
+        );
+    }
+
     #[test]
     fn clipboard_round_trip_in_private_station() {
         // A child owns a private, noninteractive window station/desktop. These tests
