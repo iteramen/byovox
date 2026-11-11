@@ -401,10 +401,8 @@ fn selected_text_with_client(
         let count = providers
             .Length()
             .map_err(|_| "Read aloud: cannot inspect text selections")?;
-        if count > 128 {
-            return Err(format!(
-                "Read aloud: too many visible text selection providers ({count})"
-            ));
+        if let Some(copied) = provider_limit_fallback(count, fallback)? {
+            return Ok(copied);
         }
         for index in 0..count {
             if Instant::now() >= deadline {
@@ -455,6 +453,26 @@ fn selected_text_with_client(
         }
         Ok(selected)
     }
+}
+
+// Outer None means continue the bounded UIA scan; Some is the completed Copy result.
+fn provider_limit_fallback(
+    count: i32,
+    fallback: Option<&dyn Fn() -> Result<Option<String>, String>>,
+) -> Result<Option<Option<String>>, String> {
+    if count > 128 {
+        // Large applications can expose hundreds of providers even for a selected
+        // draft. Do not enumerate their ranges or raise the bound. The focused
+        // password/source checks have already passed; Copy rechecks source/focus,
+        // cancellation and clipboard freshness before admitting any text.
+        if let Some(copy) = fallback {
+            return copy().map(Some);
+        }
+        return Err(format!(
+            "Read aloud: too many visible text selection providers ({count})"
+        ));
+    }
+    Ok(None)
 }
 
 fn missing_text_pattern(code: windows::core::HRESULT) -> bool {
@@ -793,6 +811,40 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    #[test]
+    fn large_provider_tree_uses_copy_once_without_expanding_scan() {
+        let calls = std::cell::Cell::new(0);
+        let copy = || {
+            calls.set(calls.get() + 1);
+            Ok(Some("synthetic selected text".to_owned()))
+        };
+        assert_eq!(
+            super::provider_limit_fallback(128, Some(&copy)).unwrap(),
+            None
+        );
+        assert_eq!(calls.get(), 0);
+        assert_eq!(
+            super::provider_limit_fallback(961, Some(&copy)).unwrap(),
+            Some(Some("synthetic selected text".to_owned()))
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(
+            super::provider_limit_fallback(961, None)
+                .unwrap_err()
+                .contains("961")
+        );
+        let refused = || Err("Read aloud: selected control changed".to_owned());
+        assert_eq!(
+            super::provider_limit_fallback(961, Some(&refused)).unwrap_err(),
+            "Read aloud: selected control changed"
+        );
+        let empty = || Ok(None);
+        assert_eq!(
+            super::provider_limit_fallback(961, Some(&empty)).unwrap(),
+            Some(None)
+        );
     }
 
     #[test]

@@ -230,10 +230,10 @@ Dictation has a separate shortcut; empty legacy narration bindings resolve to Ct
 Another narration press stops reading. Selection discovery runs on one bounded worker,
 with enabled/busy/generation checks before and after lookup. On the explicit gesture,
 Windows UI Automation checks the focused control and visible
-foreground text-selection providers. It uses a filtered UIA TextPattern-provider snapshot with at most 128 returned visible TextPattern providers and a 1.5-second budget checked between providers
+foreground text-selection providers. It inspects ranges from a filtered UIA TextPattern-provider snapshot only when it contains at most 128 visible providers, with a 1.5-second budget checked between providers
 (each platform call has a one-second timeout; this is not a hard total-time bound). GetText is used
-only for a non-degenerate selected range. Password fields, conflicting ranges, provider/limit errors
-or a changed window refuse the action without opening the microphone. It never reads document contents as a fallback. When UIA supplies no selection, default-on
+only for a non-degenerate selected range. Password fields, conflicting ranges, provider errors or scan timeouts
+or a changed window refuse the action without opening the microphone. It never reads document contents as a fallback. When UIA supplies no selection or the snapshot exceeds 128 providers, default-on
 `tts.copy_fallback` uses the app's Copy command under the guards below. The selected range or
 app-provided Copy result goes
 to your configured TTS endpoint, in chunks, with model, voice and speed (`read_aloud::synthesize`).

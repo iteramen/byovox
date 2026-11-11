@@ -241,9 +241,9 @@ Selection lookup runs on a bounded worker so slow providers cannot delay dictati
 
 The focused control and visible foreground text-selection providers are checked, so highlighting
 chat text can work even when the composer retains focus. Only explicit non-empty TextPattern
-ranges are read first. If none is available, guarded Copy fallback is enabled by default
+ranges are read first. If none is available or the window exposes over 128 providers, guarded Copy fallback is enabled by default
 (`tts.copy_fallback = false` disables it). Passwords, ambiguous selections,
-provider errors and lookup limits refuse narration without opening the microphone.
+provider errors and scan timeouts refuse narration without opening the microphone.
 The selected range or the app's Copy result goes to your TTS server. Reading never types, records or saves text/audio. The Copy fallback temporarily uses the clipboard;
 clipboard history, sync or managers may retain that text. A changed foreground window before selection is
 read is refused. The server can retain requests under its own policy.
