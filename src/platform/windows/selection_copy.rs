@@ -769,6 +769,10 @@ mod tests {
                 // the documented Windows limitation behind the live ownerless refusal;
                 // it does not change admission policy or inspect the user's clipboard.
                 let before_ownerless = GetClipboardSequenceNumber();
+                let mut before_ownerless_saved = {
+                    let _lock = Clipboard::open(owner.0).unwrap();
+                    snapshot().unwrap()
+                };
                 {
                     let temporary_owner = Owner::new().unwrap();
                     let _lock = Clipboard::open(temporary_owner.0).unwrap();
@@ -785,6 +789,20 @@ mod tests {
                         decode_text(&clipboard_bytes(UNICODE_TEXT, 1000).unwrap()).unwrap(),
                         "fresh ownerless fixture"
                     );
+                }
+                restore(
+                    owner.0,
+                    &mut before_ownerless_saved,
+                    GetClipboardSequenceNumber(),
+                    0,
+                    HWND::default(),
+                )
+                .unwrap();
+                {
+                    let _lock = Clipboard::open(owner.0).unwrap();
+                    for (format, expected) in &originals {
+                        assert_eq!(&clipboard_bytes(*format, MAX_SNAPSHOT).unwrap(), expected);
+                    }
                 }
                 // A newer source-owned write must not be overwritten even with the same PID.
                 let mut saved = {
