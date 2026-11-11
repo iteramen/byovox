@@ -95,3 +95,14 @@ Native coverage remains pending; parent #33 remains draft. Android main fixes we
 into its narration branch (0ec9d0d), but item 4 implementation has not started.
 
 Copy candidate local validation: fmt/clippy, 469 library + 5 CLI tests passed (18 ignored), benchmark self-test passed. Native private-station clipboard round-trip/race tests passed without touching the interactive clipboard. Application-level Copy acceptance is still pending.
+
+
+### #42 terminal follow-up
+
+PR #43 merged a2b18cc; installed reviewed 55acb02 with configuration unchanged. Owner confirmed
+Notepad++ works; chat still failed. Status identifies the deliberate terminal refusal. Add the
+Windows Terminal-specific Ctrl+Insert Copy route, keeping other terminal hosts refused and
+retaining clipboard/source/generation guards. Regression 9bdb155 failed on both route and keys.
+No terminal/chat native acceptance is claimed before the new candidate is tested.
+
+Terminal candidate local validation: fmt/clippy, 471 library + 5 CLI tests passed (18 ignored), benchmark self-test passed. Native clipboard tests still pass. Terminal selected-text/empty-selection behavior remains a manual qualification checkpoint.

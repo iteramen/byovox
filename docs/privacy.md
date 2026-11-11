@@ -274,8 +274,17 @@ that. The original clipboard snapshot is held only in RAM, bounded to 64 support
 Unsupported clipboard formats refuse before Copy. Newer clipboard updates are never overwritten.
 
 This path never cuts, pastes or selects all. It rejects stale/foreign copies, password controls,
-known terminals and source changes. Scintilla/Notepad++ empty selections are checked explicitly.
+unsupported terminals and source changes. Scintilla/Notepad++ empty selections are checked explicitly.
 Other apps can define Copy as current-line copying when nothing is selected: select the intended
 text before invoking narration. Cancellation prevents TTS but still attempts to restore any Copy
 result already produced. Timeout/restore failure can leave copied text on the clipboard and is
 reported; clipboard content is never logged or saved in byovox history. See SECURITY.md for limits.
+
+
+Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
+binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
+refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
+Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
+running application when no selection exists. No fresh source-owned clipboard result means no
+narration. Custom bindings and application handling of an unhandled chord remain source-app
+behavior; existing clipboard, source/focus and cancellation guards still apply.
