@@ -1,5 +1,8 @@
 //! Recording indication: tray colour always; pill and cue as configured layers.
 
+pub const NO_VOICE_MESSAGE: &str =
+    "No voice recorded. Check your microphone, mute switch and selected input.";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IndicatorState {
     Idle,
@@ -11,6 +14,8 @@ pub enum IndicatorState {
     Uncertain,
     /// Shown for ~3 s by the UI, then Idle; the pipeline never sets Idle after Error.
     Error,
+    /// Empty or silent audio after a real hold; actionable notice, then Idle.
+    NoVoice,
 }
 
 pub trait Indicator: Send {

@@ -96,6 +96,19 @@ into its narration branch (0ec9d0d), but item 4 implementation has not started.
 
 Copy candidate local validation: fmt/clippy, 469 library + 5 CLI tests passed (18 ignored), benchmark self-test passed. Native private-station clipboard round-trip/race tests passed without touching the interactive clipboard. Application-level Copy acceptance is still pending.
 
+### Dictation no-voice feedback
+
+The owner confirmed dictation text lands after correcting the input, then selected the exact
+`Microphone (fifine Microphone)` device. This supersedes the earlier Synaptics preference.
+The ambiguous `Microphone` selector had matched tranScreen virtual audio; its silent takes
+returned to Idle without explaining why no text appeared.
+
+Regression 5b68f71 captures the missing feedback. Empty/silent captures after a real hold now
+show a four-second "no voice recorded" pill and a fixed Windows notification suggesting the
+microphone, mute switch and input setting. They still skip STT and insertion; short taps and
+cancels remain quiet. Local fmt/clippy, 474 library + 5 CLI tests (18 ignored), and benchmark
+self-test pass. Muted Fifine notice and unmuted dictation remain native acceptance checks.
+
 
 ### #42 terminal follow-up
 
