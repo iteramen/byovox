@@ -721,6 +721,26 @@ mod tests {
         assert_eq!(lane.base_url, "https://example.invalid/v1");
     }
     #[test]
+    fn narration_starts_with_a_short_chunk_and_keeps_the_remainder() {
+        let input = "A synthetic sentence for narration latency. ".repeat(30);
+        let parts = chunks(&input).unwrap();
+        assert!(parts[0].chars().count() <= 120);
+        assert!(parts.iter().skip(1).any(|part| part.chars().count() > 120));
+        assert_eq!(
+            parts.join(" ").split_whitespace().collect::<Vec<_>>(),
+            input.split_whitespace().collect::<Vec<_>>()
+        );
+        let unicode = "😀".repeat(620);
+        let parts = chunks(&unicode).unwrap();
+        assert!(parts[0].chars().count() <= 120);
+        assert_eq!(parts.concat(), unicode);
+        assert_eq!(
+            chunks("A short sentence.").unwrap(),
+            vec!["A short sentence."]
+        );
+    }
+
+    #[test]
     fn chunks_are_bounded_unicode_and_do_not_drop_text() {
         let input = "שלום ".repeat(500);
         let parts = chunks(&input).unwrap();
