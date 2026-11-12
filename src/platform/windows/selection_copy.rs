@@ -6,7 +6,7 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardOwner,
-    GetClipboardSequenceNumber, OpenClipboard, SetClipboardData,
+    GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard, SetClipboardData,
 };
 use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
@@ -145,10 +145,14 @@ fn preservable(format: u32) -> bool {
 }
 
 fn clipboard_bytes(format: u32, limit: usize) -> Result<Vec<u8>, String> {
+    read_clipboard_bytes(format, limit, UNSAFE_SNAPSHOT)
+}
+
+fn read_clipboard_bytes(format: u32, limit: usize, context: &str) -> Result<Vec<u8>, String> {
     let started = Instant::now();
     let failure = |stage: &str| {
         format!(
-            "{UNSAFE_SNAPSHOT} (format={format}, stage={stage}, read_ms={})",
+            "{context} (format={format}, stage={stage}, read_ms={})",
             started.elapsed().as_millis()
         )
     };
@@ -266,9 +270,15 @@ fn decode_text(bytes: &[u8]) -> Result<String, String> {
 }
 
 fn copied_text() -> Result<String, String> {
-    decode_text(&clipboard_bytes(
+    // The caller holds the clipboard lock after observing a fresh Copy. An app
+    // may empty the clipboard without providing text when nothing is selected.
+    if unsafe { IsClipboardFormatAvailable(UNICODE_TEXT) }.is_err() {
+        return Err("Read aloud: select text first".into());
+    }
+    decode_text(&read_clipboard_bytes(
         UNICODE_TEXT,
         (crate::read_aloud::MAX_TEXT * 2 + 1) * 2,
+        "Read aloud: copied text unavailable; select text and try again",
     )?)
 }
 
@@ -732,6 +742,24 @@ mod tests {
                     let _lock = Clipboard::open(owner.0).unwrap();
                     for (format, expected) in &originals {
                         assert_eq!(&clipboard_bytes(*format, MAX_SNAPSHOT).unwrap(), expected);
+                    }
+                }
+                // Advertised but unreadable Unicode is a read failure, not a
+                // no-selection claim and not failure to preserve the prior clipboard.
+                {
+                    let _lock = Clipboard::open(owner.0).unwrap();
+                    EmptyClipboard().unwrap();
+                    let _ = SetClipboardData(UNICODE_TEXT, None);
+                    assert!(IsClipboardFormatAvailable(UNICODE_TEXT).is_ok());
+                    let error = copied_text().unwrap_err();
+                    assert!(
+                        error.starts_with("Read aloud: copied text unavailable"),
+                        "{error}"
+                    );
+                    assert!(!error.contains("cannot safely preserve"));
+                    EmptyClipboard().unwrap();
+                    for (format, data) in &originals {
+                        set_fixture(*format, data);
                     }
                 }
                 // A valid fresh Copy can outlive its owner window. This reproduces

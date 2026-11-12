@@ -334,3 +334,16 @@ clipboard restoration/newer-update cases still run. Snapshot checks the format l
 rendering, refusing changes before Copy. Numeric format/stage/timing diagnostics help locate any
 remaining slow read without exposing clipboard contents. Supported delayed rendering can still
 block in Windows; this change is not a hard timeout or proof that the live delay is resolved.
+
+### Empty WhatsApp Copy result
+
+Owner reports the empty-selection attempt is faster on 93a97a6, but still refuses. Status showed
+Unicode format 13 failing at the render step with read_ms=0 and no snapshot_ms suffix, locating
+this particular error in reading the Copy result after preservation succeeded. The shared data
+reader had mislabeled that as a preservation failure.
+
+Regression 1a89b10 reproduces the identical error using an empty private clipboard. Fresh Copy
+without Unicode now returns "select text first"; advertised but unreadable Unicode has a distinct
+copied-text error. The private-desktop test covers empty and non-text-only Copy, restoration of
+the previous plain/HTML/RTF data, and unreadable advertised Unicode. No old clipboard text becomes
+a narration result. Native WhatsApp confirmation remains pending.
