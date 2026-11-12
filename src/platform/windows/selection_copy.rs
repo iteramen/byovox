@@ -265,6 +265,13 @@ fn decode_text(bytes: &[u8]) -> Result<String, String> {
     Ok(text)
 }
 
+fn copied_text() -> Result<String, String> {
+    decode_text(&clipboard_bytes(
+        UNICODE_TEXT,
+        (crate::read_aloud::MAX_TEXT * 2 + 1) * 2,
+    )?)
+}
+
 fn class(window: HWND) -> String {
     let mut name = [0u16; 128];
     // SAFETY: wrapper bounds the output to this stack buffer.
@@ -487,10 +494,7 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
                         if copy_target(target)? != focus {
                             return Err("Read aloud: selected control changed".into());
                         }
-                        decode_text(&clipboard_bytes(
-                            UNICODE_TEXT,
-                            (crate::read_aloud::MAX_TEXT * 2 + 1) * 2,
-                        )?)
+                        copied_text()
                     });
                 // Delayed rendering can advance the sequence. Retain the final locked value.
                 let copied = unsafe { GetClipboardSequenceNumber() };
@@ -702,6 +706,29 @@ mod tests {
                     },
                 );
                 {
+                    let _lock = Clipboard::open(owner.0).unwrap();
+                    for (format, expected) in &originals {
+                        assert_eq!(&clipboard_bytes(*format, MAX_SNAPSHOT).unwrap(), expected);
+                    }
+                }
+                // Empty/non-text Copy must be a no-selection result, preserve the
+                // original clipboard, and never reuse its text as the selected input.
+                for non_text in [false, true] {
+                    let mut saved = {
+                        let _lock = Clipboard::open(owner.0).unwrap();
+                        snapshot().unwrap()
+                    };
+                    let copied = {
+                        let _lock = Clipboard::open(owner.0).unwrap();
+                        EmptyClipboard().unwrap();
+                        if non_text {
+                            set_fixture(rtf, b"synthetic non-text-only Copy\0");
+                        }
+                        assert_eq!(copied_text().unwrap_err(), "Read aloud: select text first");
+                        drop(_lock);
+                        GetClipboardSequenceNumber()
+                    };
+                    restore(owner.0, &mut saved, copied, Some(source), Some(owner.0)).unwrap();
                     let _lock = Clipboard::open(owner.0).unwrap();
                     for (format, expected) in &originals {
                         assert_eq!(&clipboard_bytes(*format, MAX_SNAPSHOT).unwrap(), expected);
