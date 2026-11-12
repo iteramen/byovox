@@ -486,6 +486,25 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    static RENDER_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    unsafe extern "system" fn delayed_fixture_proc(
+        window: HWND,
+        message: u32,
+        wp: WPARAM,
+        lp: LPARAM,
+    ) -> windows::Win32::Foundation::LRESULT {
+        use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, WM_RENDERFORMAT};
+        if message == WM_RENDERFORMAT && wp.0 == UNICODE_TEXT as usize {
+            RENDER_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // SAFETY: Windows calls this to render our synthetic private clipboard.
+            unsafe {
+                set_fixture(UNICODE_TEXT, &bytes("delayed synthetic text"));
+            }
+            return windows::Win32::Foundation::LRESULT(0);
+        }
+        unsafe { DefWindowProcW(window, message, wp, lp) }
+    }
     #[test]
     fn windows_terminal_uses_copy_insert_and_other_terminals_stay_refused() {
         assert_eq!(
@@ -565,6 +584,33 @@ mod tests {
             )
             .unwrap();
             SetThreadDesktop(desktop).unwrap();
+            {
+                use windows::Win32::UI::WindowsAndMessaging::{GWLP_WNDPROC, SetWindowLongPtrW};
+                let owner = Owner::new().unwrap();
+                assert_ne!(
+                    SetWindowLongPtrW(
+                        owner.0,
+                        GWLP_WNDPROC,
+                        delayed_fixture_proc as *const () as isize
+                    ),
+                    0
+                );
+                let _lock = Clipboard::open(owner.0).unwrap();
+                EmptyClipboard().unwrap();
+                // NULL advertises delayed rendering; Windows' return is also NULL.
+                let _ = SetClipboardData(UNICODE_TEXT, None);
+                let _ = SetClipboardData(0x80, None); // CF_OWNERDISPLAY: unsafe to snapshot
+                assert_eq!(EnumClipboardFormats(0), UNICODE_TEXT);
+                assert_eq!(EnumClipboardFormats(UNICODE_TEXT), 0x80);
+                RENDER_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
+                assert!(snapshot().is_err());
+                assert_eq!(
+                    RENDER_CALLS.load(std::sync::atomic::Ordering::SeqCst),
+                    0,
+                    "reject unsupported formats before requesting delayed data"
+                );
+                EmptyClipboard().unwrap();
+            }
             {
                 let owner = Owner::new().unwrap();
                 let source = GetCurrentProcessId();
