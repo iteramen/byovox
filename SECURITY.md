@@ -174,7 +174,12 @@ and source changes do not fall through to Copy. Dictation never invokes this pat
 
 The Copy worker snapshots up to 64 supported HGLOBAL clipboard formats, at most 8 MiB, in RAM
 and preallocates restoration handles before sending anything. GDI/private handle formats and
-unreadable/oversized formats refuse before Copy. It requires released modifiers, the original
+unreadable/oversized formats refuse before Copy. The complete format list is checked before
+reading any data, so a later unsupported format cannot trigger needless delayed rendering of
+earlier formats. A format list changed by rendering also refuses before Copy. Snapshot errors
+may include numeric format ID, operation stage and elapsed milliseconds, never payload text.
+OS delayed rendering can still block a supported-format read; this is not a hard time bound.
+It requires released modifiers, the original
 foreground window/control, and a new nonzero clipboard sequence after the Copy request.
 The owner approved automatic fresh Copy when Windows cannot establish clipboard provenance:
 helper-process and ownerless results are accepted without a preview. Foreground/focus and

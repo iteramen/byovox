@@ -320,3 +320,17 @@ Regression 4f36c6a first failed the short-opening requirement. The opening chunk
 120-character cap; following chunks retain 500. Tests preserve English words, unbroken Unicode
 text and short input, as well as existing bounds. Native latency/Stop verification remains
 pending; the working daemon was not restarted while its on-disk TTS settings were missing.
+
+### Clipboard snapshot preflight
+
+The owner authorized restoring the missing TTS config and installing c088daa; only the TTS
+section was recovered from a hash-verified backup, with all current non-TTS settings preserved.
+WhatsApp's reported roughly 15-second preservation failure remains awaiting reproduction.
+
+Regression fe59387 uses a private desktop and a synthetic delayed-rendering owner. Advertising
+Unicode followed by unsupported CF_OWNERDISPLAY caused the old snapshot to render Unicode
+before refusing. Complete format preflight now refuses without any render call. Existing native
+clipboard restoration/newer-update cases still run. Snapshot checks the format list again after
+rendering, refusing changes before Copy. Numeric format/stage/timing diagnostics help locate any
+remaining slow read without exposing clipboard contents. Supported delayed rendering can still
+block in Windows; this change is not a hard timeout or proof that the live delay is resolved.
