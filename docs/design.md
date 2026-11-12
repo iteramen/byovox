@@ -101,6 +101,10 @@ microphone, an unknown key name or a bad `inject.mode` refuses to start.
 1. **Press.** Read the layout, resolve the language, open the microphone, then record the
    target window (after the microphone, so the first syllable never waits on UI Automation).
 2. **Release.** Close the microphone; discard a tap, a cancel, an empty or silent capture.
+   Empty/silent audio after a real hold shows a four-second "no voice recorded" pill and a
+   Windows notification to check the microphone, mute switch and selected input. The fixed
+   explanation remains in `byovox status`; no audio is uploaded or inserted. Accidental short
+   taps and explicit cancellations stay quiet, and queued presses retain discard semantics.
 3. **Encode.** Downmix, resample to 16 kHz (box prefilter, linear interpolation), 16-bit WAV.
 4. **Transcribe.** Multipart POST to `{base_url}/audio/transcriptions`: `file`, `model`,
    `response_format`, language fields, `prompt` (`stt.prompt` or the lane's), and `vad=true` on
@@ -250,6 +254,42 @@ model is in [SECURITY.md](../SECURITY.md).
 - Linux and macOS release archives; until then `cargo install --git` builds from source.
 - A per-lane `hosted` flag: `hosted` exists only on `[stt]` and `[polish]`.
 
+## Read selected text aloud
+
+Narration uses its own native Ctrl+Alt+R binding by default. Empty legacy bindings resolve
+to that default; overlapping dictation/cancel triggers are rejected. The action dispatcher
+only queues narration requests, leaving dictation press/release/cancel responsive. One
+selection worker owns a replaceable pending HWND slot, reads only after admission checks,
+and checks cancellation and pipeline state again before preparing synthesis. The existing
+TTS worker retains its own single pending prepared-text slot. Generation fences suppress
+late lookup, playback and UI results. No shared-state lock is held across selection access.
+
+`selected_text_optional` checks the focused element and visible foreground TextPattern providers, addressing
+chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
+text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
+selections. Range inspection of the filtered UIA TextPattern-provider snapshot is limited to 128 visible providers with a 1.5-second budget checked between providers (not a hard total wall-clock bound); each platform call has a one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, scan timeouts or a window change refuse without a microphone fallback. A snapshot with more than 128 providers uses guarded Copy when enabled, without iterating its ranges; Copy opt-out preserves the count-limit refusal.
+There is no value or whole-document fallback. Missing/empty UIA selection can use the
+owner-approved, default-on guarded Copy fallback (`tts.copy_fallback = false` opts out).
+
+The action dispatcher cancels TTS before forwarding dictation/cancel events. Pending forwarded
+pipeline actions remain counted until handled or drained, preventing a subsequent read action
+from starting in the gap before the pipeline has opened its microphone and updated state.
+One serial TTS worker and one pending selection bound work; generation checks fence player,
+completion and UI messages. Stop halts output immediately, clears pending text and discards late
+network replies. A blocking HTTP request can finish until its timeout, but cannot play afterwards.
+Playback uses the default output via rodio, never the microphone or dictation logs.
+
+`read_aloud::TtsConfig` defines English/default and separate HE/RU voice/endpoint/token lanes.
+The opening chunk is capped at 120 characters to reduce the wait for the first complete WAV;
+subsequent chunks retain the 500-character cap. This does not stream audio or prefetch later
+chunks: each subsequent request still starts after playback of the prior chunk ends.
+Dominant Latin/Hebrew/Cyrillic script selects a lane per chunk; unsupported scripts
+and missing voices refuse the whole selection before HTTP. The total is ≤20,000 code points.
+POST `/audio/speech` requests non-streaming PCM16 WAV with model, voice, input and speed. Both
+finite WAV lengths and Kokoro's RIFF/data streaming sentinels are accepted from a bounded body.
+Other malformed chunks, unsupported rates/channels/formats or >120 seconds per chunk are refused.
+HE/RU scaffolding does not imply configured or qualified HE/RU backends.
+
 ### Incomplete cleanup responses
 
 A nonempty cleanup reply is rejected when its first choice explicitly reports a
@@ -258,3 +298,35 @@ null or malformed values. Existing failure handling retains the complete raw tra
 and reports cleanup failure. Servers omitting finish_reason remain compatible; the client
 cannot detect truncation that a server does not report. The failure message contains no
 response text. The output token limit and prompt are unchanged.
+
+
+### Narration UI Automation lifetime
+
+The dedicated selection worker retains one UI Automation client in an explicitly initialized
+COM MTA until that thread exits. Client references are released before the apartment; no
+interface is moved to another thread. An existing STA is refused rather than silently reused.
+Only the client connection persists: selected ranges, elements and text remain request-local.
+There are no accessibility event subscriptions or background document scans. Audio COM setup
+and dictation selection/target behavior are unchanged.
+
+
+### Copy selection transaction
+
+`selection_copy` runs only after the narration UIA guards. Shortcut release precedes UIA access.
+Copy has one scoped worker under the serial selection worker; the persistent UIA/MTA thread never
+owns its hidden message-only clipboard window. The transaction snapshots supported formats,
+checks source/focus/generation, sends one marked Copy chord, accepts only a fresh nonzero-sequence
+Unicode clipboard result, then restores the snapshot before returning text. Helper-process and
+ownerless results are allowed by the owner-approved automatic policy. Sequence/process/owner-HWND checks
+occur under the clipboard lock, so a newer clipboard update is never overwritten. Preparation and
+late-result admission retain the existing generation/pipeline guards. See SECURITY.md for the
+format/size/time limits, failure boundaries and source-defined Copy semantics.
+
+
+Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
+binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
+refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
+Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
+running application when no selection exists. No fresh clipboard result means no
+narration. Custom bindings and application handling of an unhandled chord remain source-app
+behavior; existing clipboard, source/focus and cancellation guards still apply.

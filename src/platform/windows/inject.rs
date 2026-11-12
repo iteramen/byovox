@@ -1,12 +1,21 @@
+use std::cell::RefCell;
+use std::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{E_NOINTERFACE, E_POINTER, HWND};
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+};
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern,
-    IUIAutomationValuePattern, UIA_TextPatternId, UIA_ValuePatternId,
+    IUIAutomationValuePattern, SupportedTextSelection_None, TextPatternRangeEndpoint_End,
+    TextPatternRangeEndpoint_Start, TreeScope_Subtree, UIA_E_NOTSUPPORTED,
+    UIA_IsOffscreenPropertyId, UIA_IsTextPatternAvailablePropertyId, UIA_TextPatternId,
+    UIA_ValuePatternId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -247,6 +256,314 @@ fn automation() -> Result<IUIAutomation, String> {
     Ok(uia)
 }
 
+/// Read only explicit selected ranges, including a browser document outside the focused composer.
+/// No document/value/clipboard fallback: GetText is called only on a non-degenerate selection.
+pub fn selected_text(expected_window: isize) -> Result<String, String> {
+    selected_text_optional(expected_window)?.ok_or_else(|| "Read aloud: select text first".into())
+}
+
+// Selection has its own COM lifetime. Do not borrow the audio STA helper or move
+// its client between threads: UIA's cross-process helper lifetime follows the apartment.
+struct SelectionApartment(PhantomData<Rc<()>>);
+
+impl SelectionApartment {
+    fn enter() -> Result<Self, String> {
+        // SAFETY: this guard owns one successful initialization on the calling thread.
+        // RPC_E_CHANGED_MODE is an error here: an existing STA is not a valid substitute.
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+            .ok()
+            .map_err(|_| "Read aloud: Windows text access requires its own MTA worker")?;
+        Ok(Self(PhantomData))
+    }
+}
+
+impl Drop for SelectionApartment {
+    fn drop(&mut self) {
+        // SAFETY: !Send/!Sync guard balances its successful initialization on this thread.
+        unsafe { CoUninitialize() };
+    }
+}
+
+struct SelectionAutomation {
+    // Fields drop in declaration order: release the client before leaving COM.
+    uia: IUIAutomation,
+    _apartment: SelectionApartment,
+}
+
+impl SelectionAutomation {
+    fn new() -> Result<Self, String> {
+        let apartment = SelectionApartment::enter()?;
+        let uia = automation().map_err(|_| "Read aloud: Windows text access unavailable")?;
+        Ok(Self {
+            uia,
+            _apartment: apartment,
+        })
+    }
+}
+
+thread_local! {
+    // Only the dedicated selection worker calls this in production. Retain the client,
+    // not elements or text, between explicit shortcut requests; no event subscriptions.
+    static SELECTION_AUTOMATION: RefCell<Option<SelectionAutomation>> = const { RefCell::new(None) };
+}
+
+fn with_selection_automation<T>(
+    read: impl FnOnce(&IUIAutomation) -> Result<T, String>,
+) -> Result<T, String> {
+    SELECTION_AUTOMATION.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(SelectionAutomation::new()?);
+        }
+        read(&slot.as_ref().expect("initialized selection client").uia)
+    })
+}
+
+pub fn selected_text_optional(expected_window: isize) -> Result<Option<String>, String> {
+    with_selection_automation(|uia| selected_text_with_client(uia, expected_window, None))
+}
+
+pub(crate) fn narration_selection(
+    expected_window: isize,
+    copy_fallback: bool,
+    trigger: u32,
+    current: &(impl Fn() -> bool + Sync),
+) -> Result<Option<String>, String> {
+    super::selection_copy::wait_for_release(expected_window, trigger, current)?;
+    with_selection_automation(|uia| {
+        let copy = || super::selection_copy::selection(expected_window, current).map(Some);
+        selected_text_with_client(uia, expected_window, copy_fallback.then_some(&copy))
+    })
+}
+
+fn selected_text_with_client(
+    uia: &IUIAutomation,
+    expected_window: isize,
+    fallback: Option<&dyn Fn() -> Result<Option<String>, String>>,
+) -> Result<Option<String>, String> {
+    let deadline = Instant::now() + Duration::from_millis(1500);
+    // SAFETY: all interfaces belong to this apartment. UIA only reads; the separately
+    // guarded fallback may invoke Copy after the source/password/ambiguity checks.
+    unsafe {
+        let foreground = GetForegroundWindow();
+        if foreground.is_invalid() || foreground.0 as isize != expected_window {
+            return Err("Read aloud: the selected window changed; select again".into());
+        }
+        let focused = uia.GetFocusedElement().map_err(|error| {
+            format!(
+                "Read aloud: selected range unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })?;
+        if focused
+            .CurrentIsPassword()
+            .map_err(|_| "Read aloud: cannot verify text field")?
+            .as_bool()
+        {
+            return Err("Read aloud: password fields are excluded".into());
+        }
+        if top_level(uia, &focused) != Some(foreground) {
+            return Err("Read aloud: the selected window changed; select again".into());
+        }
+        let mut selections = Vec::new();
+        let mut supported = false;
+        if let Some(text) = explicit_selection(&focused)? {
+            supported = true;
+            selections.push(text);
+        }
+        let root = uia
+            .ElementFromHandle(foreground)
+            .map_err(|_| "Read aloud: cannot inspect selected window")?;
+        // Query visible TextPattern providers, not only Document-role controls: modern editors
+        // and browser text surfaces can expose the selection through an Edit or other role.
+        let condition = uia
+            .CreatePropertyCondition(UIA_IsTextPatternAvailablePropertyId, &VARIANT::from(true))
+            .map_err(|error| {
+                format!(
+                    "Read aloud: text selection filter unavailable (0x{:08X})",
+                    error.code().0 as u32
+                )
+            })?;
+        let visible = uia
+            .CreatePropertyCondition(UIA_IsOffscreenPropertyId, &VARIANT::from(false))
+            .map_err(|_| "Read aloud: visible text filter unavailable")?;
+        let condition = uia
+            .CreateAndCondition(&condition, &visible)
+            .map_err(|_| "Read aloud: visible text filter unavailable")?;
+        let providers = root
+            .FindAll(TreeScope_Subtree, &condition)
+            .map_err(|error| {
+                format!(
+                    "Read aloud: text selection lookup unavailable (0x{:08X})",
+                    error.code().0 as u32
+                )
+            })?;
+        let count = providers
+            .Length()
+            .map_err(|_| "Read aloud: cannot inspect text selections")?;
+        if let Some(copied) = provider_limit_fallback(count, fallback)? {
+            return Ok(copied);
+        }
+        for index in 0..count {
+            if Instant::now() >= deadline {
+                return Err("Read aloud: selection lookup exceeded its limit; select again".into());
+            }
+            let element = providers
+                .GetElement(index)
+                .map_err(|_| "Read aloud: selected text control became unavailable")?;
+            if element
+                .CurrentIsOffscreen()
+                .map_err(|_| "Read aloud: cannot verify selected text control")?
+                .as_bool()
+            {
+                continue;
+            }
+            if element
+                .CurrentIsPassword()
+                .map_err(|_| "Read aloud: cannot verify selected text control")?
+                .as_bool()
+            {
+                return Err("Read aloud: password fields are excluded".into());
+            }
+            if let Some(text) = explicit_selection(&element)? {
+                supported = true;
+                selections.push(text);
+            }
+        }
+        if foreground != GetForegroundWindow() {
+            return Err("Read aloud: the selected window changed; select again".into());
+        }
+        if !supported {
+            if let Some(copy) = fallback {
+                return copy();
+            }
+            let role = focused
+                .CurrentControlType()
+                .map(|value| value.0)
+                .unwrap_or(0);
+            return Err(format!(
+                "Read aloud: no selection state (focused role {role}, visible providers {count})"
+            ));
+        }
+        let selected = crate::read_aloud::unique_selection(selections)?;
+        if selected.is_none()
+            && let Some(copy) = fallback
+        {
+            return copy();
+        }
+        Ok(selected)
+    }
+}
+
+// Outer None means continue the bounded UIA scan; Some is the completed Copy result.
+fn provider_limit_fallback(
+    count: i32,
+    fallback: Option<&dyn Fn() -> Result<Option<String>, String>>,
+) -> Result<Option<Option<String>>, String> {
+    if count > 128 {
+        // Large applications can expose hundreds of providers even for a selected
+        // draft. Do not enumerate their ranges or raise the bound. The focused
+        // password/source checks have already passed; Copy rechecks source/focus,
+        // cancellation and clipboard freshness before admitting any text.
+        if let Some(copy) = fallback {
+            return copy().map(Some);
+        }
+        return Err(format!(
+            "Read aloud: too many visible text selection providers ({count})"
+        ));
+    }
+    Ok(None)
+}
+
+fn missing_text_pattern(code: windows::core::HRESULT) -> bool {
+    code.is_ok()
+        || code == E_NOINTERFACE
+        || code == E_POINTER
+        || code.0 as u32 == UIA_E_NOTSUPPORTED
+}
+
+fn optional_selection_ranges<T>(result: windows::core::Result<T>) -> Result<Option<T>, String> {
+    match result {
+        Ok(ranges) => Ok(Some(ranges)),
+        Err(error) if error.code().is_ok() => Ok(None),
+        Err(error) => Err(format!(
+            "Read aloud: selected range unavailable (0x{:08X})",
+            error.code().0 as u32
+        )),
+    }
+}
+
+/// Outer None: no TextPattern provider; inner None: verified empty/caret selection.
+unsafe fn explicit_selection(
+    element: &IUIAutomationElement,
+) -> Result<Option<Option<String>>, String> {
+    unsafe {
+        let pattern =
+            match element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
+                Ok(pattern) => pattern,
+                Err(error) if missing_text_pattern(error.code()) => {
+                    return Ok(None);
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "Read aloud: selection pattern unavailable (0x{:08X})",
+                        error.code().0 as u32
+                    ));
+                }
+            };
+        if pattern.SupportedTextSelection().map_err(|error| {
+            format!(
+                "Read aloud: selection capability unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })? == SupportedTextSelection_None
+        {
+            return Ok(Some(None));
+        }
+        let Some(ranges) = optional_selection_ranges(pattern.GetSelection())? else {
+            return Ok(Some(None));
+        };
+        let count = ranges.Length().map_err(|error| {
+            format!(
+                "Read aloud: selected range unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })?;
+        if count == 0 {
+            return Ok(Some(None));
+        }
+        if count != 1 {
+            return Err("Read aloud: select one contiguous text range".into());
+        }
+        let range = ranges.GetElement(0).map_err(|error| {
+            format!(
+                "Read aloud: selected range unavailable (0x{:08X})",
+                error.code().0 as u32
+            )
+        })?;
+        if range
+            .CompareEndpoints(
+                TextPatternRangeEndpoint_Start,
+                &range,
+                TextPatternRangeEndpoint_End,
+            )
+            .map_err(|_| "Read aloud: cannot verify selected range")?
+            == 0
+        {
+            return Ok(Some(None));
+        }
+        let limit = (crate::read_aloud::MAX_TEXT * 2 + 1) as i32;
+        let raw = range
+            .GetText(limit)
+            .map_err(|_| "Read aloud: cannot read selected range")?;
+        if raw.len() >= limit as usize {
+            return Err("Read aloud: selection exceeds 20,000 characters".into());
+        }
+        let text = raw.to_string();
+        Ok(Some((!text.trim().is_empty()).then_some(text)))
+    }
+}
+
 /// The window an element lives in, by UIA ancestry, not the foreground (WhatsApp's box is a hidden WebView2).
 /// # Safety
 /// The caller holds the apartment both interfaces were made in.
@@ -402,6 +719,163 @@ impl Target for WinTarget {
 
 #[cfg(test)]
 mod tests {
+    // Other tests can keep the process MTA alive. An uninitialized thread may then
+    // report an implicit MTA, which is distinct from owning an explicit initialization.
+    fn assert_no_explicit_apartment() {
+        use windows::Win32::System::Com::{
+            APTTYPE, APTTYPEQUALIFIER, APTTYPEQUALIFIER_IMPLICIT_MTA, CoGetApartmentType,
+        };
+        let mut apartment = APTTYPE::default();
+        let mut qualifier = APTTYPEQUALIFIER::default();
+        // SAFETY: live out-parameters on this thread.
+        if unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.is_ok() {
+            assert_eq!(qualifier, APTTYPEQUALIFIER_IMPLICIT_MTA);
+        }
+    }
+
+    #[test]
+    fn narration_selection_refuses_sta_without_uninitializing_it() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{APTTYPE, APTTYPEQUALIFIER, CoGetApartmentType};
+            let _audio = super::Apartment::enter().unwrap();
+            let mut before = APTTYPE::default();
+            let mut after = APTTYPE::default();
+            let mut qualifier = APTTYPEQUALIFIER::default();
+            // SAFETY: live out-parameters in the audio apartment on this fresh thread.
+            unsafe { CoGetApartmentType(&mut before, &mut qualifier) }.unwrap();
+            assert!(super::with_selection_automation(|_| Ok(())).is_err());
+            unsafe { CoGetApartmentType(&mut after, &mut qualifier) }.unwrap();
+            assert_eq!(
+                before, after,
+                "failed MTA initialization must not release the STA"
+            );
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn narration_selection_balances_nested_mta_initialization() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{
+                APTTYPE, APTTYPE_MTA, APTTYPEQUALIFIER, CoGetApartmentType,
+            };
+            let outer = super::SelectionApartment::enter().unwrap();
+            let inner = super::SelectionApartment::enter().unwrap();
+            drop(inner);
+            let mut apartment = APTTYPE::default();
+            let mut qualifier = APTTYPEQUALIFIER::default();
+            // SAFETY: live out-parameters; dropping the inner S_FALSE guard leaves the outer alive.
+            unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.unwrap();
+            assert_eq!(apartment, APTTYPE_MTA);
+            drop(outer);
+            assert_no_explicit_apartment();
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn narration_selection_client_keeps_its_mta_between_requests() {
+        std::thread::spawn(|| {
+            use windows::Win32::System::Com::{
+                APTTYPE, APTTYPE_MTA, APTTYPEQUALIFIER, CoGetApartmentType,
+            };
+            use windows::core::Interface;
+            let mut apartment = APTTYPE::default();
+            let mut qualifier = APTTYPEQUALIFIER::default();
+            // SAFETY: live out-parameters on this fresh worker thread.
+            assert_no_explicit_apartment();
+            let first = super::with_selection_automation(|uia| {
+                // SAFETY: live out-parameters, no interface crosses threads.
+                unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.unwrap();
+                assert_eq!(
+                    apartment, APTTYPE_MTA,
+                    "selection must use MTA, not the audio STA"
+                );
+                Ok(uia.clone())
+            })
+            .unwrap();
+            // The apartment and its client must remain alive between shortcut requests.
+            unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) }.unwrap();
+            assert_eq!(apartment, APTTYPE_MTA);
+            super::with_selection_automation(|uia| {
+                assert_eq!(
+                    first.as_raw(),
+                    uia.as_raw(),
+                    "selection client must be reused"
+                );
+                Ok(())
+            })
+            .unwrap();
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn large_provider_tree_uses_copy_once_without_expanding_scan() {
+        let calls = std::cell::Cell::new(0);
+        let copy = || {
+            calls.set(calls.get() + 1);
+            Ok(Some("synthetic selected text".to_owned()))
+        };
+        assert_eq!(
+            super::provider_limit_fallback(128, Some(&copy)).unwrap(),
+            None
+        );
+        assert_eq!(calls.get(), 0);
+        assert_eq!(
+            super::provider_limit_fallback(961, Some(&copy)).unwrap(),
+            Some(Some("synthetic selected text".to_owned()))
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(
+            super::provider_limit_fallback(961, None)
+                .unwrap_err()
+                .contains("961")
+        );
+        let refused = || Err("Read aloud: selected control changed".to_owned());
+        assert_eq!(
+            super::provider_limit_fallback(961, Some(&refused)).unwrap_err(),
+            "Read aloud: selected control changed"
+        );
+        let empty = || Ok(None);
+        assert_eq!(
+            super::provider_limit_fallback(961, Some(&empty)).unwrap(),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn successful_null_selection_array_means_no_selected_range() {
+        let null = Err::<(), _>(windows::core::Error::from_hresult(windows::core::HRESULT(
+            0,
+        )));
+        assert!(super::optional_selection_ranges(null).unwrap().is_none());
+        assert!(
+            super::optional_selection_ranges(Err::<(), _>(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_ACCESSDENIED
+            )))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn successful_null_pattern_is_absence_not_a_selection_failure() {
+        // UIA returns S_OK plus null for an unsupported pattern. windows-rs reports
+        // that null interface as Error::empty(), whose HRESULT is still S_OK.
+        assert!(super::missing_text_pattern(windows::core::HRESULT(0)));
+        assert!(super::missing_text_pattern(
+            windows::Win32::Foundation::E_NOINTERFACE
+        ));
+        assert!(!super::missing_text_pattern(
+            windows::Win32::Foundation::E_ACCESSDENIED
+        ));
+        assert!(!super::missing_text_pattern(windows::core::HRESULT(
+            0x80040201u32 as i32
+        )));
+    }
     use super::*;
     use windows::Win32::UI::Accessibility::TreeScope_Descendants;
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowTextW};

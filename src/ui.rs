@@ -104,6 +104,8 @@ pub enum MenuAction {
 #[derive(Debug, Clone)]
 pub enum UserEvent {
     Indicator(IndicatorState),
+    /// Generation checked at delivery, so cancelled read-aloud cannot replace a newer dictation indicator.
+    ReadAloud(u64, Arc<std::sync::atomic::AtomicU64>, IndicatorState),
     Menu(MenuAction),
     /// The cue sink may be bound to a removed endpoint. Posted from a WASAPI thread, so it carries nothing.
     AudioDeviceChanged,
@@ -147,7 +149,7 @@ pub fn icon_rgba(state: IndicatorState) -> Vec<u8> {
         IndicatorState::Idle | IndicatorState::Done | IndicatorState::Uncertain => (140, 140, 140),
         IndicatorState::Recording => (220, 40, 40),
         IndicatorState::Working => (230, 160, 30),
-        IndicatorState::Error => (200, 30, 90),
+        IndicatorState::Error | IndicatorState::NoVoice => (200, 30, 90),
     };
     let mut px = vec![0u8; 32 * 32 * 4];
     for y in 0..32 {
@@ -215,6 +217,7 @@ pub fn pill_text(state: IndicatorState) -> Option<&'static str> {
         IndicatorState::Recording => Some("●  recording"),
         IndicatorState::Working => Some("…  working"),
         IndicatorState::Error => Some("×  failed"),
+        IndicatorState::NoVoice => Some("no voice recorded"),
         IndicatorState::Idle | IndicatorState::Done | IndicatorState::Uncertain => None,
     }
 }
@@ -226,6 +229,7 @@ fn state_word(state: IndicatorState) -> &'static str {
         IndicatorState::Recording => "recording",
         IndicatorState::Working => "working",
         IndicatorState::Error => "error",
+        IndicatorState::NoVoice => "no voice recorded",
     }
 }
 
@@ -481,11 +485,17 @@ impl App {
                 // Only a landed dictation sounds like success; taps, cancels and empty transcripts return to Idle silently.
                 IndicatorState::Done => cue.play(&[(660.0, 60)]),
                 IndicatorState::Uncertain => cue.play(&[(330.0, 180)]),
-                IndicatorState::Error => cue.play(&[(440.0, 110), (220.0, 220)]),
+                IndicatorState::Error | IndicatorState::NoVoice => {
+                    cue.play(&[(440.0, 110), (220.0, 220)])
+                }
                 IndicatorState::Idle | IndicatorState::Working => {}
             }
         }
-        self.error_until = (state == IndicatorState::Error).then(|| Instant::now() + ERROR_HOLD);
+        self.error_until = match state {
+            IndicatorState::Error => Some(Instant::now() + ERROR_HOLD),
+            IndicatorState::NoVoice => Some(Instant::now() + Duration::from_secs(4)),
+            _ => None,
+        };
         if spinning {
             self.spin.start(Instant::now());
         } else {
@@ -681,7 +691,31 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Indicator(s) => self.apply(s, true),
+            UserEvent::Indicator(s) => {
+                self.apply(s, true);
+                #[cfg(windows)]
+                if s == IndicatorState::NoVoice
+                    && let Some(tray) = &self.tray
+                {
+                    let _ = show_balloon(tray, "byovox", crate::indicator::NO_VOICE_MESSAGE);
+                }
+            }
+            UserEvent::ReadAloud(id, generation, state) => {
+                if generation.load(std::sync::atomic::Ordering::SeqCst) == id {
+                    if shared_of(&self.shared).state == "idle" {
+                        self.apply(state, false);
+                    }
+                    if state == IndicatorState::Error {
+                        // Show the fixed cause even when idle; never replace a recording indicator or play a cue.
+                        #[cfg(windows)]
+                        if let (Some(tray), Some(message)) =
+                            (&self.tray, shared_of(&self.shared).last_error.clone())
+                        {
+                            let _ = show_balloon(tray, "byovox read aloud", &message);
+                        }
+                    }
+                }
+            }
             UserEvent::Menu(a) => self.menu(a, event_loop),
             // Scheduled only: `about_to_wait` re-opens once the disconnect burst has gone quiet.
             UserEvent::AudioDeviceChanged => self.reopen.notified(Instant::now()),
@@ -702,7 +736,12 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::RedrawRequested => pill.draw(),
             // Text is laid out in physical pixels; a DPI change must repaint.
-            WindowEvent::ScaleFactorChanged { .. } => pill.window.request_redraw(),
+            WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Resized(_) => {
+                if pill.text.is_some() {
+                    pill.position();
+                }
+                pill.window.request_redraw();
+            }
             _ => {}
         }
     }
@@ -863,10 +902,7 @@ impl Pill {
         self.text = text;
         match text {
             Some(_) => {
-                if let Some((x, y)) = cursor_position() {
-                    self.window
-                        .set_outer_position(winit::dpi::PhysicalPosition::new(x + 24, y + 24));
-                }
+                self.position();
                 self.window.set_visible(true);
                 self.window.request_redraw();
             }
@@ -875,6 +911,18 @@ impl Pill {
         // winit recomputes the ex-style on every visibility change, erasing this bit; re-assert it (set_visible runs inline, so after the wipe).
         if let Err(e) = deny_activation(&self.window) {
             tracing::warn!(error = %e, "pill lost its no-activation style");
+        }
+    }
+
+    fn position(&self) {
+        if let Some(cursor) = cursor_position() {
+            let size = self.window.outer_size();
+            let offset = (24.0 * self.window.scale_factor()).round() as i32;
+            let origin = monitor_work_area(cursor)
+                .map(|work| pill_origin(cursor, (size.width, size.height), work, offset))
+                .unwrap_or((cursor.0 + offset, cursor.1 - size.height as i32 - offset));
+            self.window
+                .set_outer_position(winit::dpi::PhysicalPosition::new(origin.0, origin.1));
         }
     }
 
@@ -916,6 +964,69 @@ impl Pill {
         }
         let _ = buf.present();
     }
+}
+
+/// Physical work-area coordinates exclude taskbars/app bars, including negative-origin monitors.
+fn pill_origin(
+    cursor: (i32, i32),
+    size: (u32, u32),
+    work: (i32, i32, i32, i32),
+    offset: i32,
+) -> (i32, i32) {
+    fn axis(cursor: i32, size: u32, low: i32, high: i32, offset: i32) -> i32 {
+        let (cursor, size, low, high, offset) = (
+            i64::from(cursor),
+            i64::from(size),
+            i64::from(low),
+            i64::from(high),
+            i64::from(offset),
+        );
+        let margin = 8.min(((high - low - size).max(0)) / 2);
+        let min = low + margin;
+        let max = (high - size - margin).max(min);
+        let preferred = if cursor + offset + size > high - margin {
+            cursor - size - offset
+        } else {
+            cursor + offset
+        };
+        preferred.clamp(min, max) as i32
+    }
+    (
+        axis(cursor.0, size.0, work.0, work.2, offset),
+        axis(cursor.1, size.1, work.1, work.3, offset),
+    )
+}
+
+#[cfg(windows)]
+fn monitor_work_area(cursor: (i32, i32)) -> Option<(i32, i32, i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: a plain monitor query; info has the API's required size and lifetime.
+    unsafe {
+        let monitor = MonitorFromPoint(
+            POINT {
+                x: cursor.0,
+                y: cursor.1,
+            },
+            MONITOR_DEFAULTTONEAREST,
+        );
+        GetMonitorInfoW(monitor, &mut info).as_bool().then_some((
+            info.rcWork.left,
+            info.rcWork.top,
+            info.rcWork.right,
+            info.rcWork.bottom,
+        ))
+    }
+}
+#[cfg(not(windows))]
+fn monitor_work_area(_: (i32, i32)) -> Option<(i32, i32, i32, i32)> {
+    None
 }
 
 /// Keep the pill out of the activation chain, taskbar and Alt-Tab. Re-assert after every `set_visible`; re-check on a winit bump.
@@ -1122,6 +1233,21 @@ fn open_path(p: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pill_stays_inside_work_area_at_taskbars_edges_and_scaled_negative_monitors() {
+        for (cursor, size, work, offset) in [
+            ((1910, 1070), (180, 36), (0, 0, 1920, 1040), 24),
+            ((5, 500), (180, 36), (60, 0, 1920, 1080), 24),
+            ((20, 2), (180, 36), (0, 60, 1920, 1080), 24),
+            ((1900, 500), (180, 36), (0, 0, 1860, 1080), 24),
+            ((-5, -5), (360, 72), (-1920, -1080, 0, -40), 48),
+        ] {
+            let (x, y) = super::pill_origin(cursor, size, work, offset);
+            assert!(x >= work.0 && y >= work.1);
+            assert!(i64::from(x) + i64::from(size.0) <= i64::from(work.2));
+            assert!(i64::from(y) + i64::from(size.1) <= i64::from(work.3));
+        }
+    }
     use super::*;
 
     #[test]
@@ -1485,6 +1611,7 @@ mod tests {
             IndicatorState::Recording,
             IndicatorState::Working,
             IndicatorState::Error,
+            IndicatorState::NoVoice,
         ] {
             for ch in pill_text(state)
                 .unwrap()
@@ -1494,6 +1621,21 @@ mod tests {
                 assert_ne!(font.lookup_glyph_index(ch), 0, "{ch:?} missing");
             }
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn no_voice_notice_fits_the_existing_pill() {
+        let font =
+            fontdue::Font::from_bytes(system_font().unwrap(), fontdue::FontSettings::default())
+                .unwrap();
+        let text = pill_text(IndicatorState::NoVoice).unwrap();
+        assert_eq!(text, "no voice recorded");
+        let width: f32 = text
+            .chars()
+            .map(|ch| font.metrics(ch, 16.0).advance_width)
+            .sum();
+        assert!(width <= (PILL_W - 16) as f32, "notice clipped: {width}");
     }
 
     #[test]

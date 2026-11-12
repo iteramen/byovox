@@ -90,3 +90,273 @@ map out, so every row below would log `auto`.
 - [ ] with a Bluetooth headset connected as the default recording device and `capture.device = "Microphone Array"`: `check`'s `mic` row names the array at 48 kHz, and a dictation leaves music in the headphones untouched (no pitch jump on press or release); a name that matches nothing → exit 2 listing the devices
 - [ ] tray menu, Microphone: it lists System default and every input by its full name, the one in use checked; plug a USB mic in or out and reopen the menu — the list follows. Pick one: config.toml's `capture.device` holds its full name, the next dictation records from it (`check`'s `mic` row names it), and the other keys and comment lines are unchanged (a comment at the end of the `device` line itself is dropped); pick System default → `device = ""`
 - [ ] `byovox setup`'s closing microphone level step, Enter at the offer: stay quiet for the 3 s floor capture, then speak a sentence for the 5 s one — the floor prints with no warning, and a normal speaking volume prints neither "this quiet, byovox would discard the dictation" nor "this level is low" nor "clipping". Repeat muted or very quiet → "this quiet, byovox would discard the dictation"; repeat close to the mic at high volume → "clipping". `n` at the offer skips straight to the closing `check`
+
+## Read-aloud qualification (2026-11-08)
+
+`cargo run --locked --example read_aloud_probe -- <own-TTS-base>` exercised the real HTTP client
+and decoded the live Kokoro PCM16 mono/24 kHz response. Its streaming RIFF/data length sentinels
+first exposed a compatibility failure; both client decoders now have a regression fixture.
+
+The manual Windows `read_aloud_desktop_probe` used only its own synthetic English paragraph,
+production UIA selection/TTS/rodio paths and native registered Ctrl+Alt+R. It passed selected
+range → live TTS → active playback; a second configured shortcut stopped it, with no playback
+1.5 seconds later and zero dictation events. The owner reported Speaking. No clipboard, mic,
+ordinary document, production config or production daemon was used.
+
+Early hook-based fixture attempts did not trigger read actions and are excluded. Native hotkey
+registration delivered the actions. The probe now displays Requesting speech before playback,
+so a second press during synthesis is clearly a cancel. Earlier repeated presses cancelled pending
+requests, rather than proving a synthesis failure. Computer-use automation could not initialize;
+the owner performed selection and shortcut presses. No injected-input test is counted as a pass.
+
+A separate `read_aloud_registration_probe` passed a real OS registration conflict, its actionable
+failure event, Disable releasing the chord to another registration, and Enable reacquiring it.
+This uses registration only, not injected input or a full tray-menu test.
+
+Remaining manual checklist: empty/unsupported/password controls; changed foreground during
+selection; Escape/Disable and dictation interruption; shortcut conflict/disabled state; long and
+mixed-language speech; elevated/custom applications; actual output-device loss. Hebrew/Russian
+voices/backends remain unconfigured and unqualified; unit tests cover routing and refusal without
+English fallback. The full daemon/release UI is not implied by the isolated fixture pass.
+
+## Contextual shortcut follow-up (2026-11-09)
+
+Owner smoke test of the installed PR build exposed a chat selection miss: focused-composer-only
+lookup reported Select text first despite highlighted message text. The owner ruled that the
+default shortcut should select read/dictate behavior from selection state. Lookup now also checks
+foreground document providers without reading unselected content. Unit cases cover an empty
+focused composer plus a selected document, duplicate/conflicting ranges, limits and consuming
+a reading press's release before a later ordinary dictation hold. Same-chord and bare-modifier
+configuration are covered; the optional separate binding remains tested separately.
+
+The reported dictation attempts reached capture but were discarded as silence, including one
+prior to the PR installation. Device metadata identified the configured generic Microphone as
+Microphone (tranScreen Audio). The owner selected Microphone Array (Synaptics Audio) instead.
+This is an input selection correction, not a reason to bypass the silence gate. Device enumeration
+uses `audio_input_probe` without opening a recording stream. Actual shared-shortcut chat read,
+empty-selection microphone dictation and output insertion need an owner-operated smoke check of
+the newly installed build; unit/CI success alone does not close that acceptance.
+
+The first contextual owner retry still refused both actions on a provider lookup error. That
+version remains a failed smoke result, not an accepted fix. The follow-up replaces walking
+unrelated UI controls with one filtered snapshot of document providers (at most 32 returned)
+and retains bounded lookups and fixed/numeric-only errors. Dictation was temporarily restored
+without the contextual lookup while this repair was prepared.
+
+The owner also reported the failed pill below the taskbar. Placement now uses the cursor
+monitor's physical work area (excluding taskbars/app bars), flips above/left as needed, clamps
+inside that area, and repositions after DPI/size changes. Geometry tests cover all four taskbar
+sides, edges, negative monitor origins and a scaled pill. Actual placement and contextual
+read/dictate behavior still need the owner-operated check on the installed follow-up.
+
+The next owner retry confirmed dictation in the chat client after the physical-input correction,
+but reading still failed and WhatsApp contextual dictation was blocked. The numeric error was
+HRESULT S_OK (0): UIA's normal successful null-pattern result is represented by windows-rs as
+Error::empty(). Treating it as a failed provider was incorrect. A regression test first failed
+for S_OK, then passed after normalizing successful-null/unsupported results to provider absence;
+access-denied and unavailable-element errors still fail closed. The owner reported the updated
+pill visible near the cursor, offset right/above. Reading and WhatsApp require a fresh native check
+of the null-pattern fix; these failed owner attempts are not accepted as passing evidence.
+
+The subsequent owner retry still failed reading and WhatsApp dictation; status identified the
+document-count guard, which had been applied before off-screen providers were excluded. The
+server-side UIA condition now combines Document control type with IsOffscreen=false before
+applying the 32-provider limit. The Windows contract also permits GetSelection to return a
+successful null array when there is no selected range/insertion point; that is normalized to
+no selection, not a provider error. Its regression test was run red then green. See the
+[Microsoft GetSelection contract](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationtextpattern-getselection).
+Native reading/WhatsApp acceptance remains pending; ordinary dictation was restored separately
+while these repairs were built.
+
+The active bound is 128 returned visible document providers (with the same time budget), rather
+than limiting total documents in a long conversation to 32 before checking visibility. No text is
+read while filtering providers; only explicit selected ranges are fetched afterwards.
+
+## Separate-function qualification (2026-11-10)
+
+The owner withdrew the shared shortcut for now and requested independent tests. The local
+configuration uses CtrlLeft+ShiftLeft+Z for dictation and CtrlLeft+AltLeft+R for narration; the
+binary and physical microphone were unchanged during that separation. WhatsApp dictation then
+passed (text landed). Preserve this known-working path while debugging narration.
+
+Narration in Notepad failed with no selection state exposed. The fallback query had filtered
+Document control roles, which can miss selection providers exposed as Edit or other control roles. It
+now filters IsTextPatternAvailable=true and IsOffscreen=false instead. GetText remains restricted
+to explicit non-degenerate selected ranges, with the same bounds/ambiguity/password/origin checks.
+Notepad narration acceptance of this follow-up is pending; the previous failed attempts are not passes.
+
+## Separate dispatch repair (2026-11-10)
+
+Issue #37. Default-binding regression failed before the change. The product now uses a
+separate default binding, resolves old empty bindings to Ctrl+Alt+R, and rejects overlap.
+Unit checks cover recording/queued-action/disabled admission without selection access,
+cancellation during blocked lookup without holding the pipeline mutex, and post-lookup
+admission. Selection runs on its own bounded worker, not on the action dispatcher.
+The no-selection error now includes only numeric role/provider-count diagnostics.
+
+Notepad native narration remains failed at the previous build. Re-test after installing
+this repair and use its diagnostics to investigate; green CI is not native acceptance.
+
+
+## Selection client lifecycle repair (2026-11-10)
+
+Issue #39 follows the failed owner checks on af15486: no selection state, focused role 50033,
+visible providers 0. The shortcut fired but selection failed before synthesis. These are failed
+native checks, not TTS endpoint evidence. The computer-use helper was unavailable; real-app
+selection still requires owner operation.
+
+A native COM regression demonstrated the old selection helper entering an STA. Selection now
+retains its own MTA client across requests. Tests cover explicit MTA ownership, client identity
+across requests, nested initialization balance, and refusal of an existing STA without disturbing
+it. Parallel tests may leave the process MTA alive, so balance checks distinguish implicit MTA
+membership from an owned initialization. No desktop content is accessed by these lifecycle tests.
+
+This aligns the selection worker with [Microsoft threading guidance](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-threading).
+It is a candidate repair for the observed provider failure, not proof that either target app now
+works. After installing, select synthetic text in Notepad and press Ctrl+Alt+R; verify speech and
+second-press Stop, then check the chat selection separately. Keep Ctrl+Shift+Z dictation separate.
+
+
+## Everyday-app narration coverage (#42)
+
+Owner confirmed Windows Notepad speech and second-press Stop on b8e6bac. Earlier failures in the
+running editor were Notepad++/Scintilla, not proof of a Windows Notepad failure. Chat selection
+remains unresolved. The owner rejected Notepad-only acceptance and approved guarded Copy fallback
+by default, with a UIA-only opt-out and documented clipboard-history tradeoff.
+
+Regression ad27ca7 failed before the default/opt-out field existed. Automated cases cover legacy
+configuration defaults, opt-out, stale-sequence refusal, restoration race guards,
+clipboard handle format refusal, malformed/empty/oversized UTF-16. A native child-process test
+creates a private noninteractive window station/desktop and verifies plain text + HTML + RTF
+restoration, empty-clipboard restoration, and refusal to overwrite a newer same-owner update.
+It never reads or changes the interactive clipboard. The source fixture closes its write before
+sampling the sequence, because Windows publishes synthesized formats on CloseClipboard.
+These tests do not prove app support.
+
+Native checklist (synthetic text only, do not use ordinary chats/documents):
+- [ ] Windows Notepad: UIA speech, Stop, no-selection refusal; existing dictation regression.
+- [ ] Notepad++: selected-text speech via Copy, Stop, empty-selection refusal (no current-line read).
+- [ ] Actual chat client: highlighted synthetic sentence, speech, Stop, empty-selection behavior.
+- [ ] WhatsApp prepared test conversation: selected synthetic text, no composer insertion/submission.
+- [ ] Browser and an available Office editor: selected text; preserve formatted clipboard content.
+- [ ] Prior plain/HTML clipboard content restored; newer clipboard update retained and narration refused.
+- [ ] Unsupported clipboard snapshot refuses before Copy; timeout/clipboard lock gives a clear error.
+- [ ] Cancel/source switch during Copy: no TTS, restore only that operation's still-current result.
+- [ ] Password fields and known terminal windows refuse Copy; UIA errors do not fall through.
+- [ ] copy_fallback=false restores UIA-only behavior. No selected text/clipboard payload in logs.
+
+No numerical coverage claim or feature acceptance until these real-app results are recorded.
+
+
+### Windows Terminal Copy follow-up
+
+Owner reports Notepad++ speech works on 55acb02. This chat failed with the explicit terminal
+refusal, before any Copy or TTS. The installed Windows Terminal settings have no Ctrl+Insert
+override. Its documented default is Copy; with no selection it forwards the chord, which is why
+this repair does not merely enable Ctrl+C/Ctrl+Shift+C for terminal windows.
+
+Regression 9bdb155 demonstrated both the old terminal refusal and incorrect Ctrl+C key sequence.
+Routing now uses Ctrl+Insert only for Windows Terminal's recognized class and refuses other known
+terminal classes. Tests pin exact virtual keys, extended Insert flags, balanced releases and the
+injection marker. Existing private-station clipboard regressions still apply.
+
+- [ ] Windows Terminal synthetic selected paragraph: narration starts and second press stops.
+- [ ] Empty terminal selection: no narration, no Ctrl+C interruption or Enter/submission.
+- [ ] Existing terminal Copy shortcut still works; no paste; prior clipboard restored.
+- [ ] Actual chat selected synthetic sentence works without disrupting its session.
+- [ ] Notepad++ remains working with its existing desktop Copy route.
+
+Reference: https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#copy
+
+### Automatic fresh Copy acceptance
+
+Chat checks on 16c2e9c and 101879c failed with helper-process and then ownerless clipboard
+results. The isolated private-desktop fixture proves valid copied text can outlive its owner
+window. It does not establish what removed the owner in the live chat.
+
+The owner approved automatic fresh Copy on 2026-11-11: require a changed nonzero sequence after
+our Copy request, unchanged foreground/focused control and a current generation, without a
+provenance requirement or preview. Stale clipboard text is never a fallback. Another app writing
+during that interval cannot be excluded. This replaces the attempted Terminal-owner exception.
+
+Regression ae87b6f failed ownerless restoration before the repair. Private-desktop tests now
+cover ownerless Unicode Copy followed by restoration of the previous plain/HTML/RTF formats;
+a newer ownerless update is preserved and restoration refused. Existing same-owner/newer-update,
+owner-window mismatch, empty clipboard, format/size/UTF-16, and key-routing tests remain.
+No interactive clipboard is touched by these tests.
+
+- [ ] Actual chat: selected synthetic text speaks, and second press stops.
+- [ ] Actual chat: empty selection does not reuse stale clipboard text.
+- [ ] Notepad++ selected text and dictation remain working with separate shortcuts.
+- [ ] Cancel/focus switch before admission prevents narration.
+
+Reference: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboardowner.
+
+### Oversized WhatsApp selection snapshot
+
+Owner reported WhatsApp narration failing on 0674873; daemon status identified 961 visible
+TextPattern providers. The 128-provider guard stopped before Copy, so this was not a TTS error.
+Regression 94861f1 reproduces that count-limit refusal. The repair calls guarded Copy once for
+oversized snapshots after focused password/source checks, without raising the scan cap or
+inspecting those providers' selected ranges. Copy opt-out still refuses. Existing provider errors,
+observed ambiguity, passwords and scan timeouts remain errors.
+
+The regression checks the 128-provider boundary, the 961-provider Copy route, opt-out refusal,
+propagation of a Copy source-change error, and an empty Copy result. WhatsApp draft speech,
+Stop and empty-selection refusal still require native acceptance; no test message is sent.
+
+### Opening narration latency
+
+The owner subsequently confirmed WhatsApp long-text speech and Stop on 690efb7. Empty selection
+remains failed: roughly 15 seconds then a clipboard-preservation refusal, before TTS. Its exact
+slow stage is unverified; this performance change does not claim to fix clipboard handling.
+
+Synthetic non-streaming requests over the configured Tailscale route measured 0.65/0.49 seconds
+for 33 characters and 7.42 seconds for 480 characters. A 113-character opening request took
+1.50/1.39 seconds. The deployed CPU TTS startup performs model warmup. These are request timings,
+not end-to-end hotkey-to-speech measurements, and do not establish latency for other texts/load.
+
+Regression 4f36c6a first failed the short-opening requirement. The opening chunk now has a
+120-character cap; following chunks retain 500. Tests preserve English words, unbroken Unicode
+text and short input, as well as existing bounds. Native latency/Stop verification remains
+pending; the working daemon was not restarted while its on-disk TTS settings were missing.
+
+### Clipboard snapshot preflight
+
+The owner authorized restoring the missing TTS config and installing c088daa; only the TTS
+section was recovered from a hash-verified backup, with all current non-TTS settings preserved.
+WhatsApp's reported roughly 15-second preservation failure remains awaiting reproduction.
+
+Regression fe59387 uses a private desktop and a synthetic delayed-rendering owner. Advertising
+Unicode followed by unsupported CF_OWNERDISPLAY caused the old snapshot to render Unicode
+before refusing. Complete format preflight now refuses without any render call. Existing native
+clipboard restoration/newer-update cases still run. Snapshot checks the format list again after
+rendering, refusing changes before Copy. Numeric format/stage/timing diagnostics help locate any
+remaining slow read without exposing clipboard contents. Supported delayed rendering can still
+block in Windows; this change is not a hard timeout or proof that the live delay is resolved.
+
+### Empty WhatsApp Copy result
+
+Owner reports the empty-selection attempt is faster on 93a97a6, but still refuses. Status showed
+Unicode format 13 failing at the render step with read_ms=0 and no snapshot_ms suffix, locating
+this particular error in reading the Copy result after preservation succeeded. The shared data
+reader had mislabeled that as a preservation failure.
+
+Regression 1a89b10 reproduces the identical error using an empty private clipboard. Fresh Copy
+without Unicode now returns "select text first"; advertised but unreadable Unicode has a distinct
+copied-text error. The private-desktop test covers empty and non-text-only Copy, restoration of
+the previous plain/HTML/RTF data, and unreadable advertised Unicode. No old clipboard text becomes
+a narration result. Native WhatsApp confirmation remains pending.
+
+### No-voice dictation feedback
+
+Owner confirmed dictation text lands after choosing a physical input, then specified fifine as
+the intended microphone. Local config now uses the exact "Microphone (fifine Microphone)" name;
+other settings were preserved. Generic "Microphone" had selected tranScreen virtual audio.
+
+Regression 5b68f71 fails the missing feedback for empty and silent captures. Both now retain
+Outcome::Discarded (no STT upload/insertion) while reporting NoVoice: a four-second pill and
+Windows notification with a fixed actionable message. Existing optional error cues apply;
+short taps/cancels do not gain a notification. Tests assert NoVoice/status and no request,
+check that short taps stay Idle, and verify the pill text fits the Windows font/width.
+Native muted-microphone notice and normal fifine dictation checks remain pending.

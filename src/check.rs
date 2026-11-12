@@ -57,6 +57,19 @@ fn cleartext_endpoints(cfg: &Config) -> Vec<(String, &str)> {
     if cfg.polish.enabled && is_cleartext_remote(&cfg.polish.base_url) {
         out.push(("polish.base_url".to_string(), cfg.polish.base_url.as_str()));
     }
+    if cfg.tts.enabled {
+        if is_cleartext_remote(&cfg.tts.base_url) {
+            out.push(("tts.base_url".into(), cfg.tts.base_url.as_str()));
+        }
+        for (code, lane) in &cfg.tts.by_language {
+            if !lane.voice.is_empty() && is_cleartext_remote(&lane.base_url) {
+                out.push((
+                    format!("tts.by_language.{code}.base_url"),
+                    lane.base_url.as_str(),
+                ));
+            }
+        }
+    }
     out
 }
 
@@ -290,6 +303,48 @@ pub fn run(cfg: &Config, config_path: &Path) -> bool {
         }
     }
 
+    if cfg.tts.enabled {
+        match cfg.tts.validate().and_then(|()| {
+            cfg.tts
+                .validate_hotkeys(&cfg.hotkey.key, &cfg.hotkey.cancel_key)
+        }) {
+            Ok(()) => line(
+                "read-aloud",
+                None,
+                &format!(
+                    "{}; copy_fallback={}; configured (selection/playback not tested); he={}, ru={}",
+                    cfg.tts.effective_hotkey(),
+                    cfg.tts.copy_fallback,
+                    if cfg
+                        .tts
+                        .by_language
+                        .get("he")
+                        .is_some_and(|l| !l.voice.is_empty())
+                    {
+                        "configured"
+                    } else {
+                        "unconfigured"
+                    },
+                    if cfg
+                        .tts
+                        .by_language
+                        .get("ru")
+                        .is_some_and(|l| !l.voice.is_empty())
+                    {
+                        "configured"
+                    } else {
+                        "unconfigured"
+                    }
+                ),
+            ),
+            Err(e) => {
+                line("read-aloud", Some(false), &e);
+                all_ok = false;
+            }
+        }
+    } else {
+        line("read-aloud", None, "off");
+    }
     let backends = match crate::platform::detect(cfg) {
         Ok(b) => b,
         Err(e) => {

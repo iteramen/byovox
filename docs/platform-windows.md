@@ -404,3 +404,49 @@ Transcript text is logged only at `logging.level = "debug"`; at `info` the log c
 timings, the language sent and the rung used, never what you said. The capture log is the
 exception: with `capture_log.enabled = true` it stores every raw and polished transcript, by
 design — that is what it is for.
+
+## Read-aloud selection
+
+With TTS enabled, Ctrl+Alt+R is the separate narration shortcut. Empty legacy bindings
+resolve to that chord; overlapping dictation/narration triggers are rejected. Dictation
+never queries selection. A dedicated selection worker keeps UIA calls off the action
+dispatcher, so release/Escape/Disable remain responsive. One pending lookup replaces old
+queued work; generation and pipeline-state checks reject late or busy results.
+
+The native RegisterHotKey binding uses no repeat, checks configured modifier sides,
+reports conflicts, releases on Disable and reacquires on Enable. Reading uses the default
+Windows output. Explicit UIA ranges are preferred; missing ranges can use guarded Copy by default.
+Set tts.copy_fallback=false for UIA-only operation; unsupported providers with Copy disabled
+report numeric control-role/provider-count metadata, never text, names or window titles.
+
+
+### Narration UI Automation lifetime
+
+The dedicated selection worker retains one UI Automation client in an explicitly initialized
+COM MTA until that thread exits. Client references are released before the apartment; no
+interface is moved to another thread. An existing STA is refused rather than silently reused.
+Only the client connection persists: selected ranges, elements and text remain request-local.
+There are no accessibility event subscriptions or background document scans. Audio COM setup
+and dictation selection/target behavior are unchanged.
+
+
+Copy fallback is Windows-only and independent of dictation. It preserves supported clipboard
+formats in RAM, rejects stale contents, checks foreground/focus and cancellation, and
+restores only its own unchanged Copy result. Scintilla editors must expose a nonempty numeric
+selection state; unsupported terminal window classes refuse. Other applications define their Copy
+behavior. Clipboard history/managers/sync can observe the temporary data. Detailed boundaries
+and opt-out are in SECURITY.md and privacy.md; qualification is per application, not universal.
+
+
+Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
+binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
+refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
+Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
+running application when no selection exists. No fresh clipboard result means no
+narration. Custom bindings and application handling of an unhandled chord remain source-app
+behavior; existing clipboard, source/focus and cancellation guards still apply.
+
+Automatic fresh Copy accepts helper-process and ownerless clipboard results when the source
+window and focused control remain unchanged. A fresh result is not proof of provenance: another
+app writing during the Copy interval cannot be excluded. This tradeoff was approved for broad
+app support. Restoration still refuses a changed clipboard sequence or observed owner.

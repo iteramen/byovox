@@ -177,6 +177,43 @@ timeout_s = 20
 # As `stt.connect_timeout_s`.
 connect_timeout_s = 5
 
+[tts]
+# Separate narration shortcut: select text, press once to read, press again to stop.
+# Dictation retains its own binding. Empty resolves to Ctrl+Alt+R; overlaps are rejected.
+# Use Ctrl/Alt/Shift/Win modifiers and a non-modifier trigger.
+# Enable after configuring your own OpenAI-compatible /audio/speech base URL.
+enabled = false
+hotkey = "ControlLeft+AltLeft+R"
+# When accessibility cannot supply a range, use the app's Copy action.
+# Copy can enter clipboard history/sync/managers. False keeps UIA-only narration.
+copy_fallback = true
+base_url = ""
+model = "kokoro"
+voice = "af_bella"
+speed = 1.0
+timeout_s = 30
+api_key_env = ""
+api_key_file = ""
+
+# Hebrew and Russian are scaffolded, not silently spoken with the English voice.
+# Fill voice (and base_url/model for a separate backend) when your server supports it.
+# Language lanes do not inherit a bearer token unless you explicitly opt in.
+[tts.by_language.he]
+base_url = ""
+model = ""
+voice = ""
+api_key_env = ""
+api_key_file = ""
+inherit_token = false
+
+[tts.by_language.ru]
+base_url = ""
+model = ""
+voice = ""
+api_key_env = ""
+api_key_file = ""
+inherit_token = false
+
 [hotkey]
 # `byovox hotkey --set <key>` changes this line without an editor, and refuses a key another
 # application has already registered system-wide; `byovox hotkey --list` names every one.

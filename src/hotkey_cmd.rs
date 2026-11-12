@@ -116,6 +116,9 @@ pub fn set(path: &Path, change: &Change, force: bool) -> Result<()> {
         cfg.hotkey.cancel_key = cancel.clone();
     }
     platform::validate(&cfg)?;
+    cfg.tts
+        .validate_hotkeys(&cfg.hotkey.key, &cfg.hotkey.cancel_key)
+        .map_err(anyhow::Error::msg)?;
 
     let chord = parse_chord(&cfg.hotkey.key).map_err(|e| anyhow::anyhow!("hotkey.key: {e}"))?;
     // Only when the key moved: re-running `--mode toggle` must not fail on an accepted conflict.

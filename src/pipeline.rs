@@ -44,6 +44,8 @@ pub struct PipelineConfig {
 #[derive(Debug)]
 pub struct Shared {
     pub state: &'static str,
+    /// Actions already forwarded by the dispatcher but not yet handled/dropped by the pipeline.
+    pub pending_actions: usize,
     /// The tray's Enable/Disable toggle. A disabled pipeline starts nothing; an event during a
     /// recording closes the microphone and discards the audio.
     pub enabled: bool,
@@ -61,6 +63,7 @@ impl Default for Shared {
     fn default() -> Shared {
         Shared {
             state: "idle",
+            pending_actions: 0,
             enabled: true,
             mode: HotkeyMode::Hold,
             last_transcript: None,
@@ -127,12 +130,17 @@ impl Outcome {
 /// hit a state machine back at Idle, and in toggle mode leave the microphone open.
 pub fn pump(pipe: &mut Pipeline, rx: &Receiver<HotkeyEvent>) {
     while let Ok(ev) = rx.recv() {
-        if pipe
+        let working = pipe
             .handle(ev, Instant::now())
-            .is_some_and(|out| out.reached_working())
-        {
-            while rx.try_recv().is_ok() {}
+            .is_some_and(|out| out.reached_working());
+        let mut handled = 1;
+        if working {
+            while rx.try_recv().is_ok() {
+                handled += 1;
+            }
         }
+        let mut shared = pipe.shared.lock().unwrap();
+        shared.pending_actions = shared.pending_actions.saturating_sub(handled);
     }
 }
 
@@ -359,14 +367,14 @@ impl Pipeline {
         // and whisper answers an empty WAV with HTTP 400. Not asked; `Discarded`, decided before
         // any request, so `pump` must not drop the press queued behind it.
         if audio.samples.is_empty() {
-            self.set_state(State::Idle, IndicatorState::Idle);
+            self.no_voice();
             tracing::info!("empty capture discarded");
             return Outcome::Discarded;
         }
         // A muted or dead microphone delivers digital zero, and whisper can type a stock phrase
         // over it with a no-speech score the gate trusts.
         if audio.is_silent() {
-            self.set_state(State::Idle, IndicatorState::Idle);
+            self.no_voice();
             tracing::info!("silent capture discarded");
             return Outcome::Discarded;
         }
@@ -614,6 +622,11 @@ impl Pipeline {
         self.set_state(State::Idle, IndicatorState::Error);
     }
 
+    fn no_voice(&mut self) {
+        self.shared.lock().unwrap().last_error = Some(crate::indicator::NO_VOICE_MESSAGE.into());
+        self.set_state(State::Idle, IndicatorState::NoVoice);
+    }
+
     fn set_state(&mut self, state: State, ind: IndicatorState) {
         self.shared.lock().unwrap().state = match state {
             State::Idle => "idle",
@@ -782,6 +795,8 @@ mod tests {
         );
         assert!(r.stt.calls.lock().unwrap().is_empty());
         assert_eq!(r.cap.stops(), 1);
+        assert_eq!(r.ind.0.lock().unwrap().last(), Some(&S::Idle));
+        assert!(r.p.shared().lock().unwrap().last_error.is_none());
     }
 
     #[test]
@@ -1396,7 +1411,11 @@ mod tests {
         );
         assert!(r.stt.calls.lock().unwrap().is_empty());
         assert_eq!(r.p.shared().lock().unwrap().state, "idle");
-        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Error));
+        assert_eq!(
+            r.p.shared().lock().unwrap().last_error.as_deref(),
+            Some("No voice recorded. Check your microphone, mute switch and selected input.")
+        );
+        assert_eq!(r.ind.0.lock().unwrap().last(), Some(&S::NoVoice));
         assert!(
             !r.ind.0.lock().unwrap().contains(&S::Working),
             "the Working indicator was shown"
@@ -1424,7 +1443,11 @@ mod tests {
             "a silent capture was recorded"
         );
         assert_eq!(r.p.shared().lock().unwrap().state, "idle");
-        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Error));
+        assert_eq!(
+            r.p.shared().lock().unwrap().last_error.as_deref(),
+            Some("No voice recorded. Check your microphone, mute switch and selected input.")
+        );
+        assert_eq!(r.ind.0.lock().unwrap().last(), Some(&S::NoVoice));
         assert!(
             !r.ind.0.lock().unwrap().contains(&S::Working),
             "the Working indicator was shown"
@@ -1553,6 +1576,47 @@ mod tests {
             Box::new(ind),
             None,
         )
+    }
+
+    #[test]
+    fn pending_actions_fence_the_gap_before_microphone_start_updates_state() {
+        struct StartingCapture(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+        impl Capture for StartingCapture {
+            fn start(&mut self) -> Result<(), String> {
+                self.0.send(()).unwrap();
+                self.1.recv_timeout(Duration::from_secs(3)).unwrap();
+                Err("synthetic open failure".into())
+            }
+            fn stop(&mut self) -> Result<Audio, String> {
+                unreachable!()
+            }
+        }
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let mut p = pump_rig(
+            HotkeyMode::Hold,
+            FakeCapture::new(0),
+            Box::new(FakeTranscriber::ok("unused")),
+            FakeIndicator::default(),
+        );
+        p.capture = Box::new(StartingCapture(entered_tx, release_rx));
+        let shared = p.shared();
+        shared.lock().unwrap().pending_actions = 1;
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(HotkeyEvent::Pressed).unwrap();
+        drop(tx);
+        let worker = std::thread::spawn(move || pump(&mut p, &rx));
+        entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        {
+            let state = shared.lock().unwrap();
+            assert_eq!(state.state, "idle");
+            assert_eq!(state.pending_actions, 1);
+        }
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        let state = shared.lock().unwrap();
+        assert_eq!(state.state, "idle");
+        assert_eq!(state.pending_actions, 0);
     }
 
     #[test]
