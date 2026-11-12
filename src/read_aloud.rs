@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub const LANGUAGES: [&str; 3] = ["en", "he", "ru"];
 pub const MAX_CHUNK: usize = 500;
+const FIRST_CHUNK: usize = 120;
 pub const MAX_TEXT: usize = 20_000;
 pub const MAX_AUDIO: usize = 12 * 1024 * 1024;
 
@@ -263,9 +264,16 @@ pub fn chunks(text: &str) -> Result<Vec<String>, String> {
     }
     let mut chunks = Vec::new();
     while !rest.is_empty() {
+        // The endpoint returns a complete WAV before playback. Start with a small
+        // request, then retain larger chunks for the rest to avoid excess requests.
+        let limit = if chunks.is_empty() {
+            FIRST_CHUNK
+        } else {
+            MAX_CHUNK
+        };
         let boundary = rest
             .char_indices()
-            .nth(MAX_CHUNK)
+            .nth(limit)
             .map(|(i, _)| i)
             .unwrap_or(rest.len());
         let prefix = &rest[..boundary];
