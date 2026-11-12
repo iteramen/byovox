@@ -1404,7 +1404,11 @@ mod tests {
         );
         assert!(r.stt.calls.lock().unwrap().is_empty());
         assert_eq!(r.p.shared().lock().unwrap().state, "idle");
-        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Error));
+        assert_eq!(
+            r.p.shared().lock().unwrap().last_error.as_deref(),
+            Some("No voice recorded. Check your microphone, mute switch and selected input.")
+        );
+        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Idle));
         assert!(
             !r.ind.0.lock().unwrap().contains(&S::Working),
             "the Working indicator was shown"
@@ -1432,7 +1436,11 @@ mod tests {
             "a silent capture was recorded"
         );
         assert_eq!(r.p.shared().lock().unwrap().state, "idle");
-        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Error));
+        assert_eq!(
+            r.p.shared().lock().unwrap().last_error.as_deref(),
+            Some("No voice recorded. Check your microphone, mute switch and selected input.")
+        );
+        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Idle));
         assert!(
             !r.ind.0.lock().unwrap().contains(&S::Working),
             "the Working indicator was shown"
