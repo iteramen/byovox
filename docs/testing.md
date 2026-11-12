@@ -347,3 +347,16 @@ without Unicode now returns "select text first"; advertised but unreadable Unico
 copied-text error. The private-desktop test covers empty and non-text-only Copy, restoration of
 the previous plain/HTML/RTF data, and unreadable advertised Unicode. No old clipboard text becomes
 a narration result. Native WhatsApp confirmation remains pending.
+
+### No-voice dictation feedback
+
+Owner confirmed dictation text lands after choosing a physical input, then specified fifine as
+the intended microphone. Local config now uses the exact "Microphone (fifine Microphone)" name;
+other settings were preserved. Generic "Microphone" had selected tranScreen virtual audio.
+
+Regression 5b68f71 fails the missing feedback for empty and silent captures. Both now retain
+Outcome::Discarded (no STT upload/insertion) while reporting NoVoice: a four-second pill and
+Windows notification with a fixed actionable message. Existing optional error cues apply;
+short taps/cancels do not gain a notification. Tests assert NoVoice/status and no request,
+check that short taps stay Idle, and verify the pill text fits the Windows font/width.
+Native muted-microphone notice and normal fifine dictation checks remain pending.

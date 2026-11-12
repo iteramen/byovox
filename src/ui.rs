@@ -149,7 +149,7 @@ pub fn icon_rgba(state: IndicatorState) -> Vec<u8> {
         IndicatorState::Idle | IndicatorState::Done | IndicatorState::Uncertain => (140, 140, 140),
         IndicatorState::Recording => (220, 40, 40),
         IndicatorState::Working => (230, 160, 30),
-        IndicatorState::Error => (200, 30, 90),
+        IndicatorState::Error | IndicatorState::NoVoice => (200, 30, 90),
     };
     let mut px = vec![0u8; 32 * 32 * 4];
     for y in 0..32 {
@@ -217,6 +217,7 @@ pub fn pill_text(state: IndicatorState) -> Option<&'static str> {
         IndicatorState::Recording => Some("●  recording"),
         IndicatorState::Working => Some("…  working"),
         IndicatorState::Error => Some("×  failed"),
+        IndicatorState::NoVoice => Some("no voice recorded"),
         IndicatorState::Idle | IndicatorState::Done | IndicatorState::Uncertain => None,
     }
 }
@@ -228,6 +229,7 @@ fn state_word(state: IndicatorState) -> &'static str {
         IndicatorState::Recording => "recording",
         IndicatorState::Working => "working",
         IndicatorState::Error => "error",
+        IndicatorState::NoVoice => "no voice recorded",
     }
 }
 
@@ -483,11 +485,17 @@ impl App {
                 // Only a landed dictation sounds like success; taps, cancels and empty transcripts return to Idle silently.
                 IndicatorState::Done => cue.play(&[(660.0, 60)]),
                 IndicatorState::Uncertain => cue.play(&[(330.0, 180)]),
-                IndicatorState::Error => cue.play(&[(440.0, 110), (220.0, 220)]),
+                IndicatorState::Error | IndicatorState::NoVoice => {
+                    cue.play(&[(440.0, 110), (220.0, 220)])
+                }
                 IndicatorState::Idle | IndicatorState::Working => {}
             }
         }
-        self.error_until = (state == IndicatorState::Error).then(|| Instant::now() + ERROR_HOLD);
+        self.error_until = match state {
+            IndicatorState::Error => Some(Instant::now() + ERROR_HOLD),
+            IndicatorState::NoVoice => Some(Instant::now() + Duration::from_secs(4)),
+            _ => None,
+        };
         if spinning {
             self.spin.start(Instant::now());
         } else {
@@ -683,7 +691,15 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::Indicator(s) => self.apply(s, true),
+            UserEvent::Indicator(s) => {
+                self.apply(s, true);
+                #[cfg(windows)]
+                if s == IndicatorState::NoVoice
+                    && let Some(tray) = &self.tray
+                {
+                    let _ = show_balloon(tray, "byovox", crate::indicator::NO_VOICE_MESSAGE);
+                }
+            }
             UserEvent::ReadAloud(id, generation, state) => {
                 if generation.load(std::sync::atomic::Ordering::SeqCst) == id {
                     if shared_of(&self.shared).state == "idle" {
@@ -1595,6 +1611,7 @@ mod tests {
             IndicatorState::Recording,
             IndicatorState::Working,
             IndicatorState::Error,
+            IndicatorState::NoVoice,
         ] {
             for ch in pill_text(state)
                 .unwrap()
@@ -1604,6 +1621,21 @@ mod tests {
                 assert_ne!(font.lookup_glyph_index(ch), 0, "{ch:?} missing");
             }
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn no_voice_notice_fits_the_existing_pill() {
+        let font =
+            fontdue::Font::from_bytes(system_font().unwrap(), fontdue::FontSettings::default())
+                .unwrap();
+        let text = pill_text(IndicatorState::NoVoice).unwrap();
+        assert_eq!(text, "no voice recorded");
+        let width: f32 = text
+            .chars()
+            .map(|ch| font.metrics(ch, 16.0).advance_width)
+            .sum();
+        assert!(width <= (PILL_W - 16) as f32, "notice clipped: {width}");
     }
 
     #[test]

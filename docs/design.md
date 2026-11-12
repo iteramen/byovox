@@ -101,6 +101,10 @@ microphone, an unknown key name or a bad `inject.mode` refuses to start.
 1. **Press.** Read the layout, resolve the language, open the microphone, then record the
    target window (after the microphone, so the first syllable never waits on UI Automation).
 2. **Release.** Close the microphone; discard a tap, a cancel, an empty or silent capture.
+   Empty/silent audio after a real hold shows a four-second "no voice recorded" pill and a
+   Windows notification to check the microphone, mute switch and selected input. The fixed
+   explanation remains in `byovox status`; no audio is uploaded or inserted. Accidental short
+   taps and explicit cancellations stay quiet, and queued presses retain discard semantics.
 3. **Encode.** Downmix, resample to 16 kHz (box prefilter, linear interpolation), 16-bit WAV.
 4. **Transcribe.** Multipart POST to `{base_url}/audio/transcriptions`: `file`, `model`,
    `response_format`, language fields, `prompt` (`stt.prompt` or the lane's), and `vad=true` on

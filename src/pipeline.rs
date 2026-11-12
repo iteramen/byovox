@@ -367,14 +367,14 @@ impl Pipeline {
         // and whisper answers an empty WAV with HTTP 400. Not asked; `Discarded`, decided before
         // any request, so `pump` must not drop the press queued behind it.
         if audio.samples.is_empty() {
-            self.set_state(State::Idle, IndicatorState::Idle);
+            self.no_voice();
             tracing::info!("empty capture discarded");
             return Outcome::Discarded;
         }
         // A muted or dead microphone delivers digital zero, and whisper can type a stock phrase
         // over it with a no-speech score the gate trusts.
         if audio.is_silent() {
-            self.set_state(State::Idle, IndicatorState::Idle);
+            self.no_voice();
             tracing::info!("silent capture discarded");
             return Outcome::Discarded;
         }
@@ -622,6 +622,11 @@ impl Pipeline {
         self.set_state(State::Idle, IndicatorState::Error);
     }
 
+    fn no_voice(&mut self) {
+        self.shared.lock().unwrap().last_error = Some(crate::indicator::NO_VOICE_MESSAGE.into());
+        self.set_state(State::Idle, IndicatorState::NoVoice);
+    }
+
     fn set_state(&mut self, state: State, ind: IndicatorState) {
         self.shared.lock().unwrap().state = match state {
             State::Idle => "idle",
@@ -790,6 +795,8 @@ mod tests {
         );
         assert!(r.stt.calls.lock().unwrap().is_empty());
         assert_eq!(r.cap.stops(), 1);
+        assert_eq!(r.ind.0.lock().unwrap().last(), Some(&S::Idle));
+        assert!(r.p.shared().lock().unwrap().last_error.is_none());
     }
 
     #[test]
@@ -1408,7 +1415,7 @@ mod tests {
             r.p.shared().lock().unwrap().last_error.as_deref(),
             Some("No voice recorded. Check your microphone, mute switch and selected input.")
         );
-        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Idle));
+        assert_eq!(r.ind.0.lock().unwrap().last(), Some(&S::NoVoice));
         assert!(
             !r.ind.0.lock().unwrap().contains(&S::Working),
             "the Working indicator was shown"
@@ -1440,7 +1447,7 @@ mod tests {
             r.p.shared().lock().unwrap().last_error.as_deref(),
             Some("No voice recorded. Check your microphone, mute switch and selected input.")
         );
-        assert_ne!(r.ind.0.lock().unwrap().last(), Some(&S::Idle));
+        assert_eq!(r.ind.0.lock().unwrap().last(), Some(&S::NoVoice));
         assert!(
             !r.ind.0.lock().unwrap().contains(&S::Working),
             "the Working indicator was shown"
