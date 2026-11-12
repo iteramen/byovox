@@ -304,3 +304,19 @@ observed ambiguity, passwords and scan timeouts remain errors.
 The regression checks the 128-provider boundary, the 961-provider Copy route, opt-out refusal,
 propagation of a Copy source-change error, and an empty Copy result. WhatsApp draft speech,
 Stop and empty-selection refusal still require native acceptance; no test message is sent.
+
+### Opening narration latency
+
+The owner subsequently confirmed WhatsApp long-text speech and Stop on 690efb7. Empty selection
+remains failed: roughly 15 seconds then a clipboard-preservation refusal, before TTS. Its exact
+slow stage is unverified; this performance change does not claim to fix clipboard handling.
+
+Synthetic non-streaming requests over the configured Tailscale route measured 0.65/0.49 seconds
+for 33 characters and 7.42 seconds for 480 characters. A 113-character opening request took
+1.50/1.39 seconds. The deployed CPU TTS startup performs model warmup. These are request timings,
+not end-to-end hotkey-to-speech measurements, and do not establish latency for other texts/load.
+
+Regression 4f36c6a first failed the short-opening requirement. The opening chunk now has a
+120-character cap; following chunks retain 500. Tests preserve English words, unbroken Unicode
+text and short input, as well as existing bounds. Native latency/Stop verification remains
+pending; the working daemon was not restarted while its on-disk TTS settings were missing.

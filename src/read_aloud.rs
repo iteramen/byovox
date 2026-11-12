@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub const LANGUAGES: [&str; 3] = ["en", "he", "ru"];
 pub const MAX_CHUNK: usize = 500;
+const FIRST_CHUNK: usize = 120;
 pub const MAX_TEXT: usize = 20_000;
 pub const MAX_AUDIO: usize = 12 * 1024 * 1024;
 
@@ -263,9 +264,16 @@ pub fn chunks(text: &str) -> Result<Vec<String>, String> {
     }
     let mut chunks = Vec::new();
     while !rest.is_empty() {
+        // The endpoint returns a complete WAV before playback. Start with a small
+        // request, then retain larger chunks for the rest to avoid excess requests.
+        let limit = if chunks.is_empty() {
+            FIRST_CHUNK
+        } else {
+            MAX_CHUNK
+        };
         let boundary = rest
             .char_indices()
-            .nth(MAX_CHUNK)
+            .nth(limit)
             .map(|(i, _)| i)
             .unwrap_or(rest.len());
         let prefix = &rest[..boundary];
@@ -720,6 +728,26 @@ mod tests {
         assert_eq!(lane.voice, "he-voice");
         assert_eq!(lane.base_url, "https://example.invalid/v1");
     }
+    #[test]
+    fn narration_starts_with_a_short_chunk_and_keeps_the_remainder() {
+        let input = "A synthetic sentence for narration latency. ".repeat(30);
+        let parts = chunks(&input).unwrap();
+        assert!(parts[0].chars().count() <= 120);
+        assert!(parts.iter().skip(1).any(|part| part.chars().count() > 120));
+        assert_eq!(
+            parts.join(" ").split_whitespace().collect::<Vec<_>>(),
+            input.split_whitespace().collect::<Vec<_>>()
+        );
+        let unicode = "😀".repeat(620);
+        let parts = chunks(&unicode).unwrap();
+        assert!(parts[0].chars().count() <= 120);
+        assert_eq!(parts.concat(), unicode);
+        assert_eq!(
+            chunks("A short sentence.").unwrap(),
+            vec!["A short sentence."]
+        );
+    }
+
     #[test]
     fn chunks_are_bounded_unicode_and_do_not_drop_text() {
         let input = "שלום ".repeat(500);

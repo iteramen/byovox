@@ -276,7 +276,10 @@ network replies. A blocking HTTP request can finish until its timeout, but canno
 Playback uses the default output via rodio, never the microphone or dictation logs.
 
 `read_aloud::TtsConfig` defines English/default and separate HE/RU voice/endpoint/token lanes.
-Dominant Latin/Hebrew/Cyrillic script selects a lane per ≤500-character chunk; unsupported scripts
+The opening chunk is capped at 120 characters to reduce the wait for the first complete WAV;
+subsequent chunks retain the 500-character cap. This does not stream audio or prefetch later
+chunks: each subsequent request still starts after playback of the prior chunk ends.
+Dominant Latin/Hebrew/Cyrillic script selects a lane per chunk; unsupported scripts
 and missing voices refuse the whole selection before HTTP. The total is ≤20,000 code points.
 POST `/audio/speech` requests non-streaming PCM16 WAV with model, voice, input and speed. Both
 finite WAV lengths and Kokoro's RIFF/data streaming sentinels are accepted from a bounded body.
