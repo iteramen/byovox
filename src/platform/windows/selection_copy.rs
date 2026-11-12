@@ -145,17 +145,24 @@ fn preservable(format: u32) -> bool {
 }
 
 fn clipboard_bytes(format: u32, limit: usize) -> Result<Vec<u8>, String> {
+    let started = Instant::now();
+    let failure = |stage: &str| {
+        format!(
+            "{UNSAFE_SNAPSHOT} (format={format}, stage={stage}, read_ms={})",
+            started.elapsed().as_millis()
+        )
+    };
     // SAFETY: caller holds OpenClipboard; only documented HGLOBAL formats enter here.
     unsafe {
-        let handle = GetClipboardData(format).map_err(|_| UNSAFE_SNAPSHOT)?;
+        let handle = GetClipboardData(format).map_err(|_| failure("render"))?;
         let memory = HGLOBAL(handle.0);
         let size = GlobalSize(memory);
         if size == 0 || size > limit {
-            return Err(UNSAFE_SNAPSHOT.into());
+            return Err(failure("size"));
         }
         let pointer = GlobalLock(memory);
         if pointer.is_null() {
-            return Err(UNSAFE_SNAPSHOT.into());
+            return Err(failure("lock"));
         }
         let bytes = std::slice::from_raw_parts(pointer.cast::<u8>(), size).to_vec();
         let _ = GlobalUnlock(memory);
@@ -163,10 +170,9 @@ fn clipboard_bytes(format: u32, limit: usize) -> Result<Vec<u8>, String> {
     }
 }
 
-fn snapshot() -> Result<Vec<SavedFormat>, String> {
-    let mut saved = Vec::new();
+fn snapshot_formats() -> Result<Vec<u32>, String> {
+    let mut formats = Vec::new();
     let mut format = 0;
-    let mut total = 0;
     loop {
         // SAFETY: caller holds OpenClipboard. LastError distinguishes end from failure.
         unsafe { SetLastError(ERROR_SUCCESS) };
@@ -177,9 +183,23 @@ fn snapshot() -> Result<Vec<SavedFormat>, String> {
             }
             break;
         }
-        if saved.len() >= MAX_FORMATS || !preservable(format) {
-            return Err(UNSAFE_SNAPSHOT.into());
+        if formats.len() >= MAX_FORMATS || !preservable(format) {
+            return Err(format!(
+                "{UNSAFE_SNAPSHOT} (format={format}, stage=preflight)"
+            ));
         }
+        formats.push(format);
+    }
+    Ok(formats)
+}
+
+fn snapshot() -> Result<Vec<SavedFormat>, String> {
+    let formats = snapshot_formats()?;
+    // Validate the complete format set before any GetClipboardData call. A later
+    // unsupported format must not force earlier owners to render data needlessly.
+    let mut saved = Vec::new();
+    let mut total = 0;
+    for &format in &formats {
         let bytes = clipboard_bytes(format, MAX_SNAPSHOT - total)?;
         total += bytes.len();
         // Preallocate every restoration handle BEFORE Copy changes the clipboard.
@@ -196,6 +216,11 @@ fn snapshot() -> Result<Vec<SavedFormat>, String> {
             let _ = GlobalUnlock(memory);
         }
         saved.push(item);
+    }
+    // A delayed renderer may publish additional formats. Never silently drop them
+    // from the saved clipboard: refuse before Copy if the advertised set changed.
+    if snapshot_formats()? != formats {
+        return Err(format!("{UNSAFE_SNAPSHOT} (stage=formats-changed)"));
     }
     Ok(saved)
 }
@@ -418,7 +443,9 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
     let owner = Owner::new()?;
     let (mut saved, before) = {
         let _clipboard = Clipboard::open(owner.0)?;
-        let saved = snapshot()?;
+        let started = Instant::now();
+        let saved = snapshot()
+            .map_err(|error| format!("{error}; snapshot_ms={}", started.elapsed().as_millis()))?;
         (saved, unsafe { GetClipboardSequenceNumber() })
     };
     if before == 0 {
@@ -486,6 +513,30 @@ fn copy_on_worker(window: isize, current: &impl Fn() -> bool) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    static RENDER_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static RENDER_EXTRA_FORMAT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    unsafe extern "system" fn delayed_fixture_proc(
+        window: HWND,
+        message: u32,
+        wp: WPARAM,
+        lp: LPARAM,
+    ) -> windows::Win32::Foundation::LRESULT {
+        use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, WM_RENDERFORMAT};
+        if message == WM_RENDERFORMAT && wp.0 == UNICODE_TEXT as usize {
+            RENDER_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // SAFETY: Windows calls this to render our synthetic private clipboard.
+            unsafe {
+                set_fixture(UNICODE_TEXT, &bytes("delayed synthetic text"));
+                let extra = RENDER_EXTRA_FORMAT.load(std::sync::atomic::Ordering::SeqCst);
+                if extra != 0 {
+                    set_fixture(extra, b"extra synthetic format\0");
+                }
+            }
+            return windows::Win32::Foundation::LRESULT(0);
+        }
+        unsafe { DefWindowProcW(window, message, wp, lp) }
+    }
     #[test]
     fn windows_terminal_uses_copy_insert_and_other_terminals_stay_refused() {
         assert_eq!(
@@ -565,6 +616,43 @@ mod tests {
             )
             .unwrap();
             SetThreadDesktop(desktop).unwrap();
+            {
+                use windows::Win32::UI::WindowsAndMessaging::{GWLP_WNDPROC, SetWindowLongPtrW};
+                let owner = Owner::new().unwrap();
+                assert_ne!(
+                    SetWindowLongPtrW(
+                        owner.0,
+                        GWLP_WNDPROC,
+                        delayed_fixture_proc as *const () as isize
+                    ),
+                    0
+                );
+                let _lock = Clipboard::open(owner.0).unwrap();
+                EmptyClipboard().unwrap();
+                // NULL advertises delayed rendering; Windows' return is also NULL.
+                let _ = SetClipboardData(UNICODE_TEXT, None);
+                let _ = SetClipboardData(0x80, None); // CF_OWNERDISPLAY: unsafe to snapshot
+                assert_eq!(EnumClipboardFormats(0), UNICODE_TEXT);
+                assert_eq!(EnumClipboardFormats(UNICODE_TEXT), 0x80);
+                RENDER_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
+                assert!(snapshot().is_err());
+                assert_eq!(
+                    RENDER_CALLS.load(std::sync::atomic::Ordering::SeqCst),
+                    0,
+                    "reject unsupported formats before requesting delayed data"
+                );
+                EmptyClipboard().unwrap();
+                // A renderer that adds a format must not have that data silently
+                // omitted from the snapshot used after Copy.
+                let extra = RegisterClipboardFormatW(w!("byovox synthetic late format"));
+                assert_ne!(extra, 0);
+                RENDER_EXTRA_FORMAT.store(extra, std::sync::atomic::Ordering::SeqCst);
+                let _ = SetClipboardData(UNICODE_TEXT, None);
+                let error = snapshot().err().expect("changed format set must refuse");
+                assert!(error.contains("formats-changed"), "{error}");
+                RENDER_EXTRA_FORMAT.store(0, std::sync::atomic::Ordering::SeqCst);
+                EmptyClipboard().unwrap();
+            }
             {
                 let owner = Owner::new().unwrap();
                 let source = GetCurrentProcessId();
