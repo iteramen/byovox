@@ -326,8 +326,8 @@ device = ""
 # hours, byovox asks api.github.com for its latest release. The request carries a
 # `byovox/<version>` User-Agent and nothing else about you or this file. A newer release
 # shows in the tray's status line with a menu item that opens its release page, and on
-# Windows as one balloon the first time that release is seen; nothing is downloaded or
-# installed. A failed request is one line in the log; the next attempt is at the first
-# daemon start a day or more later.
+# Windows as one balloon the first time that release is seen; the check downloads and
+# installs nothing (`byovox update` installs a release when you run it). A failed request
+# is one line in the log; the next attempt is at the first daemon start a day or more later.
 # false = no request is ever made.
 check = true

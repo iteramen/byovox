@@ -763,15 +763,16 @@ fn ask_source(p: &mut dyn Prompter, ollama: Option<String>) -> Result<Source> {
 }
 
 /// Head of the hosted base-URL question: what this stage sends, and that byovox sends nothing else but the daily
-/// version request and, if accepted, the one-time whisper.cpp download.
+/// version request, the one-time whisper.cpp download if accepted, and the downloads of `byovox update`.
 fn hosted_notice(what_leaves: &str) -> String {
     let mut out =
         format!("  A hosted service runs on someone else's machine: {what_leaves} will be sent");
     out.push_str("\n  there, and you are trusting it the way you trust your own keyboard.");
     out.push_str("\n  byovox sends nothing else anywhere - no telemetry, and no endpoint you");
     out.push_str("\n  did not name, except one anonymous version request to api.github.com");
-    out.push_str("\n  per day (update.check = false turns it off), and the one-time whisper.cpp");
-    out.push_str("\n  download setup offers, only if you said yes to it.\n");
+    out.push_str("\n  per day (update.check = false turns it off), the one-time whisper.cpp");
+    out.push_str("\n  download setup offers, only if you said yes to it, and the release");
+    out.push_str("\n  byovox update downloads from github.com when you run it.\n");
     out
 }
 

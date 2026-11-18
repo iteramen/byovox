@@ -1,7 +1,7 @@
 //! byovox — push-to-talk dictation against a speech-to-text server you run.
 //! CLI entry: subcommand dispatch. The daemon itself lives in `byovox::daemon`.
 
-use byovox::{check, config, daemon, hotkey_cmd, ipc, setup};
+use byovox::{check, config, daemon, deploy, hotkey_cmd, ipc, setup, update};
 // Used only by the Windows autostart path.
 #[cfg(windows)]
 use byovox::platform;
@@ -81,6 +81,8 @@ enum Cmd {
         #[arg(long)]
         disable: bool,
     },
+    /// Install the latest release over a zip install, keeping the config
+    Update,
 }
 
 fn main() {
@@ -108,6 +110,7 @@ fn main() {
         }) => hotkey_cmd_dispatch(path, set, mode, cancel, list, force),
         Some(Cmd::Config { init }) => config_cmd(path, init),
         Some(Cmd::Autostart { enable, disable }) => autostart(enable, disable, given),
+        Some(Cmd::Update) => update_cmd(given),
     };
     if let Err(e) = result {
         eprintln!("byovox: {e:#}");
@@ -184,6 +187,40 @@ fn spawn_daemon(config: Option<PathBuf>) -> Result<()> {
     }
     println!("byovox daemon started (pid {})", child.id());
     Ok(())
+}
+
+/// Every refusal comes before the daemon is stopped. The daemon is started again either way.
+fn update_cmd(config: Option<PathBuf>) -> Result<()> {
+    if !cfg!(windows) {
+        bail!("byovox update is Windows-only for now");
+    }
+    let exe = std::env::current_exe().context("current exe")?;
+    let dir = exe.parent().context("current exe has no folder")?;
+    let current = env!("CARGO_PKG_VERSION");
+    let new = update::stage(
+        &deploy::agent(),
+        update::LATEST_URL,
+        current,
+        dir,
+        &std::env::temp_dir(),
+    )
+    .map_err(anyhow::Error::msg)?;
+    let socket = ipc::socket_name();
+    if ipc::daemon_running(&socket) {
+        relay(ipc::Request::Quit)?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while ipc::daemon_running(&socket) {
+            if std::time::Instant::now() >= deadline {
+                bail!("the daemon did not stop within 10 s; nothing was replaced");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    let swapped = update::swap(dir);
+    let started = spawn_daemon(config);
+    swapped.map_err(anyhow::Error::msg)?;
+    println!("byovox updated: {current} -> {new}");
+    started
 }
 
 fn relay(req: ipc::Request) -> Result<()> {

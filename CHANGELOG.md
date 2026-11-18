@@ -9,6 +9,12 @@ went public; their notes are kept below.
 
 ## Unreleased
 
+Added
+- `byovox update` installs the latest release over a zip install: it checks the zip against the
+  release's `SHA256SUMS`, swaps in the new `byovox.exe` and `byovox-daemon.exe`, starts the
+  daemon and prints the old and new version. The config is kept, a failed swap puts the old
+  pair back, and the daily check still only announces a release.
+
 Changed
 - A dictation of room tone with a few taps or clicks is discarded as silent before any request,
   instead of being typed as whatever whisper made of it (`*crickets*`). The test is now the
