@@ -32,9 +32,10 @@ byovox ships with no server address: `stt.base_url` and `polish.base_url` are em
 them (`src/config.rs` — `SttConfig`, `PolishConfig`). Once you do:
 
 - **Your speech server.** The recording is sent as a WAV file to
-  `POST {stt.base_url}/audio/transcriptions`, once, or twice to that same address when no response
-  arrives at all (`src/stt.rs` — `SttClient::send`). With it go the model name, the response
-  format, your glossary (`stt.prompt`) if you set one, and either `language` (a two-letter code)
+  `POST {stt.base_url}/audio/transcriptions`, once, or again to that same address when no response
+  arrives at all (`src/stt.rs` — `SttClient::send`), when the server refuses `vad=true` on a take
+  over 60 seconds, or when it refuses `language_candidates` (`SttClient::transcribe`). With it go
+  the model name, the response format, your glossary (`stt.prompt`) if you set one, and either `language` (a two-letter code)
   or, on auto-detect, the `language_candidates` you listed, if any (`src/lang.rs` —
   `SttLanguage::form_fields`, `LanguagePolicy::resolve`). The code can come from the keyboard
   layout of the window you dictate into, mapped by `language.by_layout`

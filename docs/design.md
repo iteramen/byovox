@@ -11,7 +11,7 @@ and one TOML file. Only Windows has backends: the crate builds and tests on Linu
 
 - **Any OpenAI-compatible server.** `/v1/audio/transcriptions` for speech,
   `/v1/chat/completions` for cleanup. `language_candidates` is an optional whisper.cpp server
-  extension; servers without it ignore the field.
+  extension; a server that refuses it with a 4xx naming the field is not sent it again that run.
 - **Detect, then route.** Detection among candidate languages, a confident detection re-sent
   to that language's own endpoint, the keyboard layout as the hint when detection is unsure.
 - **Never lossy.** Once a transcript exists, every later failure still ends in an insert

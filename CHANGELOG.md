@@ -15,6 +15,11 @@ Changed
   95th-percentile 10 ms window at or under -40 dBFS, not every window; `byovox check` prints
   that level.
 
+Fixed
+- A speech server that rejects the `language_candidates` field with a 4xx naming it no longer
+  fails every auto-detect dictation: byovox sends the dictation again without the field, stops
+  sending it to that server until the daemon restarts, and logs one warning naming the host.
+
 ## 0.7.0 — 2026-11-18
 
 Added
