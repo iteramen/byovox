@@ -412,6 +412,9 @@ resolve to that chord; overlapping dictation/narration triggers are rejected. Di
 never queries selection. A dedicated selection worker keeps UIA calls off the action
 dispatcher, so release/Escape/Disable remain responsive. One pending lookup replaces old
 queued work; generation and pipeline-state checks reject late or busy results.
+Narration stops on another press of its shortcut or when a dictation starts, not on Escape.
+Switching windows after you release the shortcut does not stop it, except that the Copy fallback still needs
+the source window in front while it copies.
 
 The native RegisterHotKey binding uses no repeat, checks configured modifier sides,
 reports conflicts, releases on Disable and reacquires on Enable. Reading uses the default

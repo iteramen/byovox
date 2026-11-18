@@ -247,7 +247,7 @@ files, capture history or `byovox last`, even at debug level. Copy fallback temp
 text on the clipboard; generated audio is never placed there. Only fixed status and
 failure messages are shown. The TOML retains non-secret TTS configuration and token references.
 
-The shortcut toggles reading; Escape, Disable or starting dictation cancels it. Audio stops and
+The shortcut toggles reading; Disable or starting dictation cancels it, Escape does not. Audio stops and
 late replies are discarded, though a request already received by the server can finish there.
 Reading never opens the microphone or injects text. Hebrew/Russian configuration slots require
 supported voices and do not reuse an English voice silently. Dominant script chooses the route,

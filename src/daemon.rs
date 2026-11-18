@@ -238,12 +238,7 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
                     hotkey::HotkeyEvent::ReadAloud(window) => manager.toggle(window),
                     hotkey::HotkeyEvent::ReadAloudUnavailable => manager.unavailable(),
                     other => {
-                        if matches!(
-                            other,
-                            hotkey::HotkeyEvent::Pressed
-                                | hotkey::HotkeyEvent::Toggle
-                                | hotkey::HotkeyEvent::Cancel
-                        ) {
+                        if stops_narration(&other) {
                             manager.stop();
                         }
                         action_state
@@ -441,8 +436,26 @@ fn init_logging(
     Ok(guard)
 }
 
+/// Only a dictation starting stops narration (mic and speaker must not overlap); Escape is
+/// pressed in other apps while listening, so it cancels dictation alone.
+fn stops_narration(event: &hotkey::HotkeyEvent) -> bool {
+    matches!(
+        event,
+        hotkey::HotkeyEvent::Pressed | hotkey::HotkeyEvent::Toggle
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn escape_does_not_stop_narration_but_a_dictation_does() {
+        use crate::hotkey::HotkeyEvent;
+        assert!(!super::stops_narration(&HotkeyEvent::Cancel));
+        assert!(!super::stops_narration(&HotkeyEvent::Released));
+        assert!(super::stops_narration(&HotkeyEvent::Pressed));
+        assert!(super::stops_narration(&HotkeyEvent::Toggle));
+    }
+
     use super::*;
     use crate::stt::Transcriber;
     use crate::testutil::{MockServer, auth_header};

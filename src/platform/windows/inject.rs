@@ -430,9 +430,6 @@ fn selected_text_with_client(
                 selections.push(text);
             }
         }
-        if foreground != GetForegroundWindow() {
-            return Err("Read aloud: the selected window changed; select again".into());
-        }
         if !supported {
             if let Some(copy) = fallback {
                 return copy();
