@@ -172,6 +172,13 @@ min_words = 0
 # carry a capital anywhere in a sentence. A `prompt_file` below owns its own rule 1 and is
 # never rewritten, and the raw fallback (polish down) keeps whisper's capital either way.
 capitalize_first_word = true
+# Say "new line" or "new paragraph" to break the text. `true` adds a rule to the built-in
+# prompt that turns those words into a line break, and the `type` rung presses Shift+Enter
+# for each one, which breaks the line in a chat box where Enter would send. `paste`,
+# `clipboard-only` and terminal windows (Windows Terminal, the console, mintty, ConEmu) still
+# get a space, since there a newline can submit a line. A `prompt_file` is never rewritten:
+# it needs a rule of its own. Off, every line break the model returns is typed as a space.
+line_breaks = false
 # Path to a file replacing the built-in system prompt. Empty = built-in. The glossary rule
 # from `stt.prompt` (and any lane's `prompt`) is still appended after it.
 prompt_file = ""

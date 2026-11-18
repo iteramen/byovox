@@ -172,7 +172,7 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
     }
     let polisher: Option<Box<dyn polish::Polisher>> = if cfg.polish.enabled {
         let base = if cfg.polish.prompt_file.is_empty() {
-            polish::built_in(cfg.polish.capitalize_first_word)
+            polish::built_in(cfg.polish.capitalize_first_word, cfg.polish.line_breaks)
         } else {
             let file = config::expand_home(&cfg.polish.prompt_file);
             std::fs::read_to_string(&file)
@@ -222,6 +222,7 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
                 &cfg.polish.prompt_file,
             ),
             max_chars: cfg.inject.max_chars,
+            line_breaks: cfg.polish.line_breaks,
             polish_model: cfg.polish.model.clone(),
             no_speech_threshold: cfg.stt.no_speech_threshold as f32,
             no_speech_warn: cfg.stt.no_speech_warn as f32,

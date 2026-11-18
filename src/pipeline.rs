@@ -38,6 +38,9 @@ pub struct PipelineConfig {
     /// Longest transcript, in characters, that may be typed; `0` lifts the limit. A longer reply
     /// is held for `byovox last` rather than truncated.
     pub max_chars: usize,
+    /// `polish.line_breaks`: a `\n` in the reply survives sanitising and reaches the `type` rung
+    /// only; every other rung gets a space.
+    pub line_breaks: bool,
 }
 
 /// What `byovox status` / `byovox last` read; written by the pipeline thread.
@@ -467,7 +470,16 @@ impl Pipeline {
         // The last point the endpoint's text is still just data: past here it is keystrokes in
         // someone's window. The count is logged and the text is not.
         let served = polished.clone().unwrap_or_else(|| raw.clone());
-        let sanitized = sanitize(&served);
+        // With line breaks on, each line is sanitised and the `\n` between them kept.
+        let sanitized = if self.cfg.line_breaks {
+            served
+                .split('\n')
+                .map(sanitize)
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            sanitize(&served)
+        };
         let dropped = served.chars().count() - sanitized.chars().count();
         // Counted before the trim: a reply ending in a newline now ends in a space, which is
         // not a dropped character to warn about.
@@ -543,9 +555,12 @@ impl Pipeline {
             tracing::warn!(error = %e, "no window to type the dictation into");
         }
         let mut rung_used = None;
+        // Only `type` can send a line break as Shift+Enter; a pasted newline can submit a line.
+        let flat = text.replace('\n', " ");
         if !over_cap && refocused.is_ok() {
             for rung in &mut self.rungs {
-                match rung.inject(&text) {
+                let text = if rung.name() == "type" { &text } else { &flat };
+                match rung.inject(text) {
                     Ok(()) => {
                         rung_used = Some(rung.name());
                         break;
@@ -710,6 +725,7 @@ mod tests {
             max_chars: 20_000,
             no_speech_threshold: 0.6,
             no_speech_warn: 0.0,
+            line_breaks: false,
         };
         let p = Pipeline::new(
             cfg,
@@ -1562,6 +1578,7 @@ mod tests {
                 max_chars: 20_000,
                 no_speech_threshold: 0.6,
                 no_speech_warn: 0.0,
+                line_breaks: false,
             },
             Box::new(cap),
             Box::new(FakeLayout(None)),
@@ -1708,6 +1725,33 @@ mod tests {
         assert_eq!(sanitize("a\tb\rc\x08d\x7fe\u{85}f"), "abcdef");
         assert_eq!(sanitize("one\ntwo"), "one two");
         assert!(!sanitize("1. foo\n2. bar\n").contains('\n'));
+    }
+
+    #[test]
+    fn a_line_break_reaches_only_the_type_rung_and_only_with_the_setting_on() {
+        let reply = "Dear Anna,\nthe build\x1b is green.\n\nThanks.";
+        let run = |line_breaks: bool, type_fails: bool| {
+            let polish = Some(FakePolisher::ok(reply));
+            let mut r = rig(FakeTranscriber::ok("raw"), polish, type_fails, false);
+            r.p.cfg.line_breaks = line_breaks;
+            let out = dictate(&mut r, Duration::from_secs(1));
+            let typed = r.rung1.texts.lock().unwrap().clone();
+            let pasted = r.rung2.texts.lock().unwrap().clone();
+            (out, typed, pasted)
+        };
+        let flat = "Dear Anna, the build is green.  Thanks";
+
+        let (out, typed, _) = run(false, false);
+        assert_eq!(out, Some(Outcome::Inserted { rung: "type" }));
+        assert_eq!(typed, [flat], "off, a newline is still a space");
+
+        let (out, typed, _) = run(true, false);
+        assert_eq!(out, Some(Outcome::Inserted { rung: "type" }));
+        assert_eq!(typed, ["Dear Anna,\nthe build is green.\n\nThanks"]);
+
+        let (out, _, pasted) = run(true, true);
+        assert_eq!(out, Some(Outcome::Inserted { rung: "paste" }));
+        assert_eq!(pasted, [flat], "a pasted newline can submit a line");
     }
 
     #[test]

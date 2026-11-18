@@ -92,6 +92,14 @@ into a terminal stays one unexecuted line. That sanitising pass is also what kee
 enumeration on one line: the cleanup prompt often numbers it across several lines, and the
 newlines become spaces before anything is typed.
 
+With `polish.line_breaks = true`, a spoken "new line" or "new paragraph" is the exception: the
+`type` rung presses Shift+Enter for each line break, which breaks the line in Notepad, WhatsApp
+and most chat boxes without sending. `paste` and `clipboard-only` still get a space, and so does
+a window whose class is Windows Terminal's, the console's, mintty's or ConEmu's. A terminal
+byovox does not recognise that way (VS Code's integrated terminal, for one) may read Shift+Enter
+as Enter, and some apps act on it (a notebook runs the cell): leave the setting off if you
+dictate into those. A numbered list the model breaks across lines arrives on several lines too.
+
 ## Language routing
 
 The layout byovox reads is the **foreground window's**, taken from that window's own thread —

@@ -213,9 +213,13 @@ fn tts_rows(tts: &TtsConfig) -> bool {
 }
 
 /// Reading `polish.prompt_file` here makes a path typo fail the check, not the first dictation.
-fn prompt_text(prompt_file: &str, capitalize_first_word: bool) -> Result<String, String> {
+fn prompt_text(
+    prompt_file: &str,
+    capitalize_first_word: bool,
+    line_breaks: bool,
+) -> Result<String, String> {
     if prompt_file.is_empty() {
-        return Ok(crate::polish::built_in(capitalize_first_word));
+        return Ok(crate::polish::built_in(capitalize_first_word, line_breaks));
     }
     let path = expand_home(prompt_file);
     std::fs::read_to_string(&path)
@@ -607,7 +611,7 @@ fn no_speech_row(mean: Option<f32>, max: Option<f32>, threshold: f64, warn: f64)
 fn polish_round_trip(cfg: &PolishConfig, stt: &SttConfig) -> Result<String, String> {
     let key = stage_token(&cfg.api_key_env, &cfg.api_key_file)?;
     let prompt = polish::prompt_for(
-        &prompt_text(&cfg.prompt_file, cfg.capitalize_first_word)?,
+        &prompt_text(&cfg.prompt_file, cfg.capitalize_first_word, cfg.line_breaks)?,
         stt,
     );
     let client = PolishClient::new(
@@ -1089,23 +1093,27 @@ mod tests {
 
     #[test]
     fn the_configured_prompt_is_what_check_reads_and_sends() {
-        assert_eq!(prompt_text("", true).unwrap(), BUILT_IN_PROMPT);
-        let lowered = prompt_text("", false).unwrap();
+        assert_eq!(prompt_text("", true, false).unwrap(), BUILT_IN_PROMPT);
+        let lowered = prompt_text("", false, false).unwrap();
         assert_ne!(lowered, BUILT_IN_PROMPT);
         assert!(lowered.contains(crate::polish::LOWERCASE_FIRST_RULE));
+        let on = prompt_text("", true, true).unwrap();
+        assert!(on.contains(crate::polish::LINE_BREAK_RULE));
         let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
-        let text = prompt_text(manifest, true).expect("a readable file");
-        assert_eq!(
-            prompt_text(manifest, false).unwrap(),
-            text,
-            "a prompt_file owns its own rule 1 and is never rewritten"
-        );
+        let text = prompt_text(manifest, true, false).expect("a readable file");
+        for (capitalize, line_breaks) in [(false, false), (true, true), (false, true)] {
+            assert_eq!(
+                prompt_text(manifest, capitalize, line_breaks).unwrap(),
+                text,
+                "a prompt_file owns its own rules and is never rewritten"
+            );
+        }
         assert!(
             text.contains("byovox"),
             "the file's own text, not the built-in"
         );
         assert_ne!(text, BUILT_IN_PROMPT);
-        let e = prompt_text("no-such-dir/no-such-prompt.txt", true).unwrap_err();
+        let e = prompt_text("no-such-dir/no-such-prompt.txt", true, false).unwrap_err();
         let (path, io) = e
             .strip_prefix("polish.prompt_file ")
             .and_then(|rest| rest.split_once(": "))

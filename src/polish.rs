@@ -34,13 +34,25 @@ pub const CAPITALISE_FIRST_RULE: &str =
 /// the lowering sentence, or the model lowers it too.
 pub const LOWERCASE_FIRST_RULE: &str = r#"1. Add punctuation where the speech pauses or clauses end, and capitalisation inside the sentence. The English pronoun "I" is always written I, alone or in "I'm", "I've", "I'll" — never i, in any position, including the very first word. Every other first word is lower-cased, even where the transcript capitalises it: a dictation usually lands mid-sentence, so "They can wait until Monday" comes back as "they can wait until Monday". A proper noun, a personal name and an acronym keep their capital: "Anna is on her way", "IEEE approved the draft", "Москва подождёт"."#;
 
+/// Rule 8 as `BUILT_IN_PROMPT` ships it; `built_in` appends `LINE_BREAK_RULE` to it.
+pub const OUTPUT_RULE: &str = r#"8. Output only the cleaned text: no quotes around it, no explanation, no trailing commentary."#;
+
+/// Appended to rule 8 when `polish.line_breaks` is on. Rules 1-9 keep their numbers, so the
+/// glossary rule stays 10.
+pub const LINE_BREAK_RULE: &str = r#" A spoken "new line" is a line break in the output and a spoken "new paragraph" is an empty line, and the words themselves are dropped: "see you then new line Dan" comes back as "See you then." with "Dan" on the line below. The same holds for "новая строка", "с новой строки", "новый абзац", "שורה חדשה" and "פסקה חדשה". Never break a line the speaker did not dictate. When the sentence is *about* a new line or paragraph, the words stay words: "add a new line at the end of the file", "the new paragraph is too long"."#;
+
 /// The base prompt for a run that uses the built-in one: rule 1 is swapped when the first word
-/// is not to be capitalised. A `polish.prompt_file` is never rewritten.
-pub fn built_in(capitalize_first_word: bool) -> String {
-    if capitalize_first_word {
-        return BUILT_IN_PROMPT.to_string();
+/// is not to be capitalised, and rule 8 extended when line breaks are on. A
+/// `polish.prompt_file` is never rewritten.
+pub fn built_in(capitalize_first_word: bool, line_breaks: bool) -> String {
+    let mut prompt = BUILT_IN_PROMPT.to_string();
+    if !capitalize_first_word {
+        prompt = prompt.replacen(CAPITALISE_FIRST_RULE, LOWERCASE_FIRST_RULE, 1);
     }
-    BUILT_IN_PROMPT.replacen(CAPITALISE_FIRST_RULE, LOWERCASE_FIRST_RULE, 1)
+    if line_breaks {
+        prompt = prompt.replacen(OUTPUT_RULE, &format!("{OUTPUT_RULE}{LINE_BREAK_RULE}"), 1);
+    }
+    prompt
 }
 
 /// Capitalises a first-word `i`, `i'm`, `i've`, `i'll` or `i'd` (straight or curly apostrophe,
@@ -516,13 +528,17 @@ mod tests {
 
     #[test]
     fn the_first_word_flag_swaps_rule_one_and_only_rule_one() {
-        assert_eq!(built_in(true), BUILT_IN_PROMPT, "the default is untouched");
+        assert_eq!(
+            built_in(true, false),
+            BUILT_IN_PROMPT,
+            "the default is untouched"
+        );
         assert!(
             BUILT_IN_PROMPT.contains(CAPITALISE_FIRST_RULE),
             "there is a rule 1 to swap"
         );
 
-        let lowered = built_in(false);
+        let lowered = built_in(false, false);
         assert!(lowered.contains(LOWERCASE_FIRST_RULE));
         assert!(!lowered.contains(CAPITALISE_FIRST_RULE));
         // The prompt still stops at rule 9, so the glossary rule keeps its number 10.
@@ -568,6 +584,40 @@ mod tests {
             "the items file was not read: {checked} fields"
         );
         assert!(system_prompt(&lowered, Some("Glossary: Acme")).contains("10. Technical terms"));
+    }
+
+    #[test]
+    fn the_line_break_flag_adds_its_rule_and_nothing_else() {
+        assert!(BUILT_IN_PROMPT.contains(&format!("\n{OUTPUT_RULE}\n")));
+        assert!(!BUILT_IN_PROMPT.contains(LINE_BREAK_RULE));
+        let on = built_in(true, true);
+        assert!(on.contains(&format!("{OUTPUT_RULE}{LINE_BREAK_RULE}\n")));
+        assert_eq!(on.replacen(LINE_BREAK_RULE, "", 1), BUILT_IN_PROMPT);
+        let both = built_in(false, true);
+        assert_eq!(
+            both.replacen(LINE_BREAK_RULE, "", 1),
+            built_in(false, false)
+        );
+        assert!(!on.contains("\n10. "), "the glossary keeps rule 10");
+        const ITEMS: &str = include_str!("../bench/polish_items.jsonl");
+        let mut checked = 0;
+        for line in ITEMS.lines().filter(|l| !l.trim().is_empty()) {
+            let item: serde_json::Value = serde_json::from_str(line).expect("a bench item");
+            let id = item["id"].as_str().expect("id");
+            for field in ["raw", "expected"] {
+                let text = item[field].as_str().expect(field);
+                let body = text.trim_end_matches(['.', '!', '?']).trim();
+                assert!(
+                    !both.contains(body),
+                    "{id}.{field} is quoted in the prompt: {body:?}"
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 30,
+            "the items file was not read: {checked} fields"
+        );
     }
 
     #[test]

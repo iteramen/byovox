@@ -31,3 +31,8 @@
 {"id": "c-profanity-filler", "stratum": "cleanup", "raw": "um the damn thing crashed again uh right after the deploy", "expected": "The damn thing crashed again right after the deploy"}
 {"id": "t-grace-period", "stratum": "trap", "raw": "The grace period expires on Friday.", "expected": "The grace period expires on Friday"}
 {"id": "t-training-period", "stratum": "trap", "raw": "She is still in her training period at the new job.", "expected": "She is still in her training period at the new job"}
+{"id": "l-newline-en", "stratum": "line_break", "raw": "Buy milk and eggs new line call the plumber.", "expected": "Buy milk and eggs.\nCall the plumber"}
+{"id": "l-paragraph-en", "stratum": "line_break", "raw": "The report is ready new paragraph the slides come tomorrow.", "expected": "The report is ready.\n\nThe slides come tomorrow"}
+{"id": "l-newline-ru", "stratum": "line_break", "raw": "Купи хлеб новая строка позвони маме.", "expected": "Купи хлеб.\nПозвони маме"}
+{"id": "l-newline-he", "stratum": "line_break", "raw": "תקנה חלב שורה חדשה תתקשר לאמא.", "expected": "תקנה חלב.\nתתקשר לאמא"}
+{"id": "l-trap-en", "stratum": "line_break", "raw": "Press enter to start a new line in the editor.", "expected": "Press enter to start a new line in the editor"}

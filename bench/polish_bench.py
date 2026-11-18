@@ -14,16 +14,19 @@ so every item runs `--runs` times and passes only when every run matches.
     python bench/polish_bench.py --prompt-file p.txt  # a copy of the prompt living elsewhere
     python bench/polish_bench.py --capture <dictations.jsonl>  # byovox's capture log as the baseline
     python bench/polish_bench.py --no-capitalize      # the prompt polish.capitalize_first_word=false sends
+    python bench/polish_bench.py --line-breaks        # the prompt polish.line_breaks=true sends
     python bench/polish_bench.py --self-test          # loopback only: extraction and scoring
 
 Strata: `punctuation` (spoken names to marks), `trap` (a mark's name used as an ordinary
 word, and a collocation used as ordinary prose — both must survive untouched), `cleanup`
 (fillers and repetitions, plus the enumeration and profanity rules),
 `injection` (content shaped like an instruction to the model), `capitalization` (the first
-word lower-cased). The last one is scored only when the
-first-word rule is off and the others only when it is on — their expected texts disagree about
-the first word — so the flag, or `polish.capitalize_first_word`, picks which half runs. A
-selection that lands on the empty half exits 2: a gate may not pass with nothing measured.
+word lower-cased), `line_break` (a spoken "new line" or "new paragraph"). `capitalization` is
+scored only when the first-word rule is off and the others only when it is on — their expected
+texts disagree about the first word — so the flag, or `polish.capitalize_first_word`, picks
+which half runs. `line_break` runs only with `--line-breaks` or `polish.line_breaks`, whose
+typed text keeps its line breaks. A selection that lands on nothing exits 2: a gate may not
+pass with nothing measured.
 Scoring compares punctuation like any other character — never stripped or normalised away —
 because a punctuation rule is what this bench exists for.
 Exit status is 0 when every selected stratum passes, 1 otherwise, 2 on a setup error. The
@@ -53,13 +56,15 @@ from typing import NoReturn
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 # `injection` is content shaped like an instruction to the model; rule 7 says it is content.
-STRATA = ("punctuation", "trap", "cleanup", "injection", "capitalization")
+STRATA = ("punctuation", "trap", "cleanup", "injection", "capitalization", "line_break")
 
 # The first-word rule splits the items into two sets that can never be scored in one run:
 # `capitalization` expects a lowercase first word (right only with the rule off), every other
 # stratum expects the leading capital. `--no-capitalize` scores exactly the first set, a default
 # run the rest.
 CAPITALIZATION = "capitalization"
+# Expects typed line breaks, which only `polish.line_breaks` keeps.
+LINE_BREAK = "line_break"
 
 
 def setup_error(msg: str) -> NoReturn:
@@ -72,24 +77,30 @@ def setup_error(msg: str) -> NoReturn:
 # ---------------------------------------------------------------- the prompt, as the daemon sends it
 
 
-def built_in_prompt(src: str, capitalize: bool = True) -> str:
-    """`BUILT_IN_PROMPT` out of src/polish.rs, byte for byte — or with rule 1 swapped, exactly
-    as `polish::built_in` does it when `polish.capitalize_first_word` is false."""
+def built_in_prompt(src: str, capitalize: bool = True, line_breaks: bool = False) -> str:
+    """`BUILT_IN_PROMPT` out of src/polish.rs, byte for byte — or with rule 1 swapped when
+    `polish.capitalize_first_word` is false, and rule 8 extended when `polish.line_breaks` is
+    true, exactly as `polish::built_in` does it."""
     m = re.search(r'pub const BUILT_IN_PROMPT: &str = r#"(.*?)"#;', src, re.S)
     if not m:
         setup_error("polish.rs: BUILT_IN_PROMPT not found where the bench expects it")
     base = m.group(1)
-    if capitalize:
-        return base
-    old, new = rule_one(src, "CAPITALISE_FIRST_RULE"), rule_one(src, "LOWERCASE_FIRST_RULE")
-    if old not in base:
-        setup_error("polish.rs: CAPITALISE_FIRST_RULE is not the rule 1 BUILT_IN_PROMPT carries")
-    return base.replace(old, new, 1)
+    if not capitalize:
+        old, new = rule_one(src, "CAPITALISE_FIRST_RULE"), rule_one(src, "LOWERCASE_FIRST_RULE")
+        if old not in base:
+            setup_error("polish.rs: CAPITALISE_FIRST_RULE is not the rule 1 BUILT_IN_PROMPT carries")
+        base = base.replace(old, new, 1)
+    if line_breaks:
+        out = rule_one(src, "OUTPUT_RULE")
+        if out not in base:
+            setup_error("polish.rs: OUTPUT_RULE is not the rule 8 BUILT_IN_PROMPT carries")
+        base = base.replace(out, out + rule_one(src, "LINE_BREAK_RULE"), 1)
+    return base
 
 
 def rule_one(src: str, name: str) -> str:
-    """One of the two rule-1 constants, read the way BUILT_IN_PROMPT is (both are raw Rust
-    literals)."""
+    """One of the rule constants `polish::built_in` swaps in, read the way BUILT_IN_PROMPT is
+    (all are raw Rust literals)."""
     m = re.search(name + r': &str =\s*r#"(.*?)"#;', src, re.S)
     if not m:
         setup_error("polish.rs: " + name + " is not where the bench expects it")
@@ -156,7 +167,11 @@ def default_config() -> Path:
 
 
 def system_prompt_for(
-    cfg: dict, candidate: str | None, prompt_file: Path | None = None, capitalize: bool = True
+    cfg: dict,
+    candidate: str | None,
+    prompt_file: Path | None = None,
+    capitalize: bool = True,
+    line_breaks: bool = False,
 ) -> str:
     """`--prompt-file` wins over the config's `polish.prompt_file`, which wins over the
     built-in: the glossary rule is composed on top of whichever base, as the daemon does."""
@@ -167,7 +182,7 @@ def system_prompt_for(
     elif polish.get("prompt_file"):
         base = expand_home(polish["prompt_file"]).read_text(encoding="utf-8")
     else:
-        base = built_in_prompt(src, capitalize)
+        base = built_in_prompt(src, capitalize, line_breaks)
     if candidate:
         # Appended before the glossary rule, numbered as the candidate file numbers it: the
         # bench reproduces what the daemon would send, it does not renumber.
@@ -286,6 +301,9 @@ def forbidden(c: str) -> bool:
 # Set by main when the first-word rule is off: the daemon then runs `polish::restore_first_i`
 # on the polish reply (`polish::restores_first_i`), and the bench scores what is typed.
 RESTORE_FIRST_I = False
+# Set by main when `polish.line_breaks` is on: the pipeline then sanitises each line on its own
+# and keeps the `\n` between them, which the `type` rung types.
+LINE_BREAKS = False
 
 
 def restore_first_i(text: str) -> str:
@@ -306,10 +324,15 @@ def typed(text: str) -> str:
     `sanitize`, then the tail of `Pipeline::finish`): every newline, U+2028 and U+2029 becomes
     a space, forbidden characters go, the ends are trimmed, exactly one terminal period is
     popped (an ellipsis stays) and the space it may expose goes with it. Nothing else is
-    normalised: a doubled space in the reply is a doubled space typed."""
+    normalised: a doubled space in the reply is a doubled space typed. With LINE_BREAKS each
+    line is sanitised on its own and the newlines between them stay."""
     if RESTORE_FIRST_I:
         text = restore_first_i(text)
-    t = "".join(" " if c in "\n\u2028\u2029" else c for c in text if c in "\n\u2028\u2029" or not forbidden(c)).strip()
+    lines = text.split("\n") if LINE_BREAKS else [text]
+    t = "\n".join(
+        "".join(" " if c in "\n\u2028\u2029" else c for c in line if c in "\n\u2028\u2029" or not forbidden(c))
+        for line in lines
+    ).strip()
     if t.endswith(".") and not t.endswith(".."):
         t = t[:-1].rstrip()
     return t
@@ -333,7 +356,7 @@ def edit_rate(out: str, expected: str) -> float:
 # ---------------------------------------------------------------- items
 
 
-def load_items(path: Path, only: str | None, capitalize: bool = True) -> list[dict]:
+def load_items(path: Path, only: str | None, capitalize: bool = True, line_breaks: bool = False) -> list[dict]:
     items = []
     seen = set()
     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -350,6 +373,8 @@ def load_items(path: Path, only: str | None, capitalize: bool = True) -> list[di
         seen.add(it["id"])
         # See CAPITALIZATION: the flag selects which set of expectations is in force.
         if (it["stratum"] == CAPITALIZATION) == capitalize:
+            continue
+        if it["stratum"] == LINE_BREAK and not line_breaks:
             continue
         if only is None or it["stratum"] == only:
             items.append(it)
@@ -491,13 +516,23 @@ def self_test() -> None:
     assert lowered != base and rule_one(src, "LOWERCASE_FIRST_RULE") in lowered, "rule 1 swaps"
     assert rule_one(src, "CAPITALISE_FIRST_RULE") not in lowered
     assert lowered.replace(rule_one(src, "LOWERCASE_FIRST_RULE"), rule_one(src, "CAPITALISE_FIRST_RULE"), 1) == base, "only rule 1 moved"
+    out, lb_rule = rule_one(src, "OUTPUT_RULE"), rule_one(src, "LINE_BREAK_RULE")
+    assert "\n" + out + "\n" in base and lb_rule not in base, "rule 8 is there to extend"
+    broken = built_in_prompt(src, line_breaks=True)
+    assert out + lb_rule + "\n" in broken, "the line-break rule follows rule 8"
+    assert broken.replace(lb_rule, "", 1) == base, "the variant adds only the line-break rule"
+    assert built_in_prompt(src, False, True).replace(lb_rule, "", 1) == lowered, "and composes with rule 1"
+    assert "\n10. " not in broken, "the glossary rule keeps its number"
 
     on = load_items(HERE / "polish_items.jsonl", None)
     off = load_items(HERE / "polish_items.jsonl", None, capitalize=False)
-    assert {it["stratum"] for it in on} == set(STRATA) - {CAPITALIZATION}, "the default scores the rest"
+    lb = load_items(HERE / "polish_items.jsonl", None, line_breaks=True)
+    assert {it["stratum"] for it in on} == set(STRATA) - {CAPITALIZATION, LINE_BREAK}, "the default scores the rest"
     assert {it["stratum"] for it in off} == {CAPITALIZATION}, "the flag scores its own stratum"
+    assert {it["stratum"] for it in lb} == set(STRATA) - {CAPITALIZATION}, "line breaks add their stratum"
+    assert not load_items(HERE / "polish_items.jsonl", LINE_BREAK, capitalize=False, line_breaks=True)
     assert not [it for it in on if it in off], "the two sets are disjoint"
-    assert {it["stratum"] for it in on + off} == set(STRATA), "every stratum has items"
+    assert {it["stratum"] for it in on + off + lb} == set(STRATA), "every stratum has items"
     assert speed_verdict(63.3, MIN_TOK_S) is None, "a healthy endpoint is not refused"
     assert speed_verdict(None, MIN_TOK_S) is None, "an endpoint that reports no usage is not refused"
     assert speed_verdict(MIN_TOK_S, MIN_TOK_S) is None, "the floor itself passes"
@@ -506,6 +541,12 @@ def self_test() -> None:
         assert msg and "not comparable" in msg, f"{degraded} tok/s must be refused"
     items = on + off
     assert all(typed(it["expected"]) == it["expected"] for it in items), "expected text is written as typed"
+    global LINE_BREAKS
+    LINE_BREAKS = True
+    assert all(typed(it["expected"]) == it["expected"] for it in lb), "and with line breaks typed"
+    assert any("\n" in it["expected"] for it in lb), "a line_break item expects a line break"
+    assert typed("Hi there\nb\x1bye\r\n\nend.\n") == "Hi there\nbye\n\nend", "each line sanitised, the breaks kept"
+    LINE_BREAKS = False
     for raw, want in (("i think", "I think"), ("i\u2019ll go", "I\u2019ll go"), ("  i, for one", "  I, for one"), ("i", "I")):
         assert restore_first_i(raw) == want, raw
     for same in ("so i think", "set i to zero", "(i) first", "i.e. later", "i18n", "iPhone", "i's", "\u0438", "", "  "):
@@ -566,6 +607,12 @@ def main() -> int:
         "scores the `capitalization` stratum, which is skipped otherwise",
     )
     ap.add_argument(
+        "--line-breaks",
+        action="store_true",
+        help="compose the prompt the daemon sends with polish.line_breaks = true and type line "
+        "breaks as the `type` rung does; scores the `line_break` stratum, which is skipped otherwise",
+    )
+    ap.add_argument(
         "--min-tok-s",
         type=float,
         default=MIN_TOK_S,
@@ -596,8 +643,11 @@ def main() -> int:
     timeout = float(polish_cfg.get("timeout_s", 20))  # PolishConfig's default
     # The flag, or the config's own key, exactly as the daemon resolves it.
     capitalize = polish_cfg.get("capitalize_first_word", True) and not a.no_capitalize
-    global RESTORE_FIRST_I
+    line_breaks = bool(polish_cfg.get("line_breaks", False)) or a.line_breaks
+    global RESTORE_FIRST_I, LINE_BREAKS
     RESTORE_FIRST_I = not capitalize  # a prompt file with the rule off is refused just below
+    # A prompt file is never rewritten, but the pipeline keeps its line breaks all the same.
+    LINE_BREAKS = line_breaks
     # A replacement prompt owns its own rule 1 and `polish::built_in` never rewrites it, so the
     # first-word rule cannot be swapped into one: the items would switch while the prompt did not.
     if not capitalize and (a.prompt_file or polish_cfg.get("prompt_file")):
@@ -611,10 +661,10 @@ def main() -> int:
         return 2
     try:
         candidate = a.candidate.read_text(encoding="utf-8") if a.candidate else None
-        prompts = [("baseline", system_prompt_for(cfg, None, a.prompt_file, capitalize))]
+        prompts = [("baseline", system_prompt_for(cfg, None, a.prompt_file, capitalize, line_breaks))]
         if candidate:
             prompts.append(
-                ("candidate", system_prompt_for(cfg, candidate, a.prompt_file, capitalize))
+                ("candidate", system_prompt_for(cfg, candidate, a.prompt_file, capitalize, line_breaks))
             )
     except OSError as e:
         print(f"prompt: {e}", file=sys.stderr)
@@ -625,15 +675,16 @@ def main() -> int:
         return 0
 
     try:
-        items = load_items(a.items, a.only, capitalize)
+        items = load_items(a.items, a.only, capitalize, line_breaks)
         if not items and not a.capture:
             # Silent green is the one thing a gate may never be: `--only` applies after the
             # first-word partition, so some combinations select nothing and `run_items` is skipped.
             which = f"--only {a.only}" if a.only else "the items file"
             setup_error(
-                f"{which} selects no items with capitalize_first_word={capitalize}. "
-                f"The `{CAPITALIZATION}` stratum is scored only with the rule off, every other "
-                "stratum only with it on; nothing was measured, so this is not a pass."
+                f"{which} selects no items with capitalize_first_word={capitalize} and "
+                f"line_breaks={line_breaks}. The `{CAPITALIZATION}` stratum is scored only with "
+                f"the first-word rule off, every other stratum only with it on, and `{LINE_BREAK}` "
+                "only with line breaks on; nothing was measured, so this is not a pass."
             )
         rows = load_capture(a.capture) if a.capture else []
     except OSError as e:
