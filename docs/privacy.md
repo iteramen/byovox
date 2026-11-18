@@ -245,7 +245,7 @@ token unless `inherit_token = true` explicitly selects the default TTS credentia
 no redirects. Selected text, generated audio and server response bodies are never written to logs,
 files, capture history or `byovox last`, even at debug level. Copy fallback temporarily exposes
 text on the clipboard; generated audio is never placed there. Only fixed status and
-failure messages are shown. The TOML retains non-secret TTS configuration and token references.
+failure messages are shown, and a failure is logged with that message alone. The TOML retains non-secret TTS configuration and token references.
 
 The shortcut toggles reading; Disable or starting dictation cancels it, Escape does not. Audio stops and
 late replies are discarded, though a request already received by the server can finish there.

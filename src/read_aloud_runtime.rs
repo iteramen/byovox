@@ -63,6 +63,10 @@ fn report(
     if generation.load(Ordering::SeqCst) != id {
         return;
     }
+    if let Some(e) = &error {
+        // Fixed messages and numeric metadata only, never selected text.
+        tracing::warn!(error = %e, "read aloud failed");
+    }
     snapshot.last_error = error;
     drop(snapshot);
     let _ = proxy.send_event(UserEvent::ReadAloud(id, generation.clone(), state));

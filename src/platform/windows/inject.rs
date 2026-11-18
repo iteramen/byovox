@@ -329,9 +329,12 @@ pub(crate) fn narration_selection(
     trigger: u32,
     current: &(impl Fn() -> bool + Sync),
 ) -> Result<Option<String>, String> {
-    super::selection_copy::wait_for_release(expected_window, trigger, current)?;
+    // UIA sends no keys, so only Copy waits for the shortcut's release with the window in front.
     with_selection_automation(|uia| {
-        let copy = || super::selection_copy::selection(expected_window, current).map(Some);
+        let copy = || {
+            super::selection_copy::wait_for_release(expected_window, trigger, current)?;
+            super::selection_copy::selection(expected_window, current).map(Some)
+        };
         selected_text_with_client(uia, expected_window, copy_fallback.then_some(&copy))
     })
 }

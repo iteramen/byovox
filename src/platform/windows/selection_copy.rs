@@ -34,8 +34,14 @@ const UNSAFE_SNAPSHOT: &str =
 
 fn source_current(window: isize, current: &impl Fn() -> bool) -> Result<(), String> {
     // SAFETY: getter; handles are compared only, never dereferenced.
-    if !current() || unsafe { GetForegroundWindow() }.0 as isize != window {
-        return Err("Read aloud: cancelled or source window changed".into());
+    if !current() {
+        return Err("Read aloud: cancelled".into());
+    }
+    if unsafe { GetForegroundWindow() }.0 as isize != window {
+        return Err(
+            "Read aloud: this app is read through Copy, which needs its window in front until reading starts"
+                .into(),
+        );
     }
     Ok(())
 }

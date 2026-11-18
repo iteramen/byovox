@@ -235,7 +235,7 @@ voice = "af_bella"
 ```
 
 Select text and press Ctrl+Alt+R to read it aloud. Press again to stop; starting a dictation
-stops it too. Escape and switching windows do not.
+stops it too. Escape does not, and once reading starts neither does switching windows.
 Dictation keeps its own shortcut and never depends on selection lookup. An empty legacy
 `tts.hotkey` uses Ctrl+Alt+R; overlapping dictation/narration bindings are rejected.
 Selection lookup runs on a bounded worker so slow providers cannot delay dictation stop/cancel.

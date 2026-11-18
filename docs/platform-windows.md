@@ -413,8 +413,8 @@ never queries selection. A dedicated selection worker keeps UIA calls off the ac
 dispatcher, so release/Escape/Disable remain responsive. One pending lookup replaces old
 queued work; generation and pipeline-state checks reject late or busy results.
 Narration stops on another press of its shortcut or when a dictation starts, not on Escape.
-Switching windows after you release the shortcut does not stop it, except that the Copy fallback still needs
-the source window in front while it copies.
+Switching windows does not stop it, except in an app read through the Copy fallback, which needs
+its window in front until reading starts. A failed read logs its message at WARN.
 
 The native RegisterHotKey binding uses no repeat, checks configured modifier sides,
 reports conflicts, releases on Disable and reacquires on Enable. Reading uses the default
