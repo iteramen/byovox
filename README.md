@@ -26,6 +26,9 @@ machine — default no
 **Already have a Whisper server running somewhere?** Skip to step 3, and give the wizard its
 address in step 4 — `http://<host>:8770/v1`. Check it was started with the two flags below;
 that server needs `--host 0.0.0.0` rather than loopback to be reachable from another machine.
+The client's URL never uses `0.0.0.0`: it is `127.0.0.1` on the server's own machine and the
+server's address elsewhere; byovox refuses at startup a `base_url` it would connect to on
+`0.0.0.0` or `[::]`.
 
 Otherwise: the exact Windows steps — which zip, which model file, how big it is — are in
 **[docs/platform-windows.md](docs/platform-windows.md#1-whisper-server)**. The short version is

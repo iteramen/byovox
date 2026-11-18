@@ -18,6 +18,9 @@ Changed
   instead of being typed as whatever whisper made of it (`*crickets*`). The test is now the
   95th-percentile 10 ms window at or under -40 dBFS, not every window; `byovox check` prints
   that level.
+- New startup refusal: a `base_url` on `0.0.0.0` or `[::]` (`stt`, `stt.by_language`, `polish`,
+  `tts`) fails config validation with an error naming the key and `127.0.0.1`, instead of every
+  dictation failing with os error 10049. The server's own `--host 0.0.0.0` is unaffected.
 
 Fixed
 - A speech server that rejects the `language_candidates` field with a 4xx naming it no longer
