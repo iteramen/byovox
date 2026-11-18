@@ -7,12 +7,18 @@ Each release is a tag; the zip, its `SHA256SUMS` and a build-provenance attestat
 published from it. 0.1.0 to 0.4.0 were released privately, under MIT, before this repository
 went public; their notes are kept below.
 
-## Unreleased
+## 0.7.0 — 2026-11-18
 
 Added
 - Read aloud: select text and press Ctrl+Alt+R to hear it from your own TTS server; press again
   to stop. byovox copies the selection and puts your clipboard text back. Off until `[tts]` is
   configured; see the README.
+- A dictation that recorded no voice (an empty or silent microphone) shows "no voice recorded"
+  and a Windows notification, instead of going quietly back to idle.
+
+Fixed
+- A cleanup reply cut off at its token limit no longer replaces the transcript with partial text;
+  the raw transcript is inserted instead.
 
 ## 0.6.0 — 2026-11-05
 
