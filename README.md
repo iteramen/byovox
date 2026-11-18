@@ -256,5 +256,6 @@ saves it.
 
 English is the first target. Hebrew/Russian endpoint and voice slots need supported server
 voices; a missing voice refuses reading, with no English substitution. Routing is by dominant
-script per chunk, not language detection: Latin-script text uses English. `byovox check` reports
-the configuration only and does not try a read.
+script per chunk, not language detection: Latin-script text uses English. `byovox check` sends
+a short fixed phrase to each lane with a voice and prints a `tts`, `tts[he]` or `tts[ru]` row;
+it does not test the selection or play the audio.
