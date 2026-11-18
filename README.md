@@ -240,9 +240,9 @@ Ctrl+Alt+R, and a binding that overlaps dictation's is rejected.
 
 When you release the shortcut, byovox copies the selection with the app's own Copy (Ctrl+C, or
 Ctrl+Insert in Windows Terminal, where Ctrl+C would interrupt the program), then puts your
-previous clipboard text back. Stay in the window until it starts reading, then go where you
-like. Nothing selected means nothing is read. In Windows Terminal, a program that copies on
-select, such as herdr, has already put its selection on the clipboard, so that text is read.
+previous clipboard text, image or file list back. Stay in the window until it starts reading,
+then go where you like. Nothing selected means nothing is read. In Windows Terminal, a program
+that copies on select, such as herdr, has already put its selection on the clipboard, so that text is read.
 Other console windows are not supported. While
 the text is on the clipboard, Windows clipboard history and sync can keep it. The text goes to
 your TTS server, which can retain requests under its own policy; byovox never types, records or

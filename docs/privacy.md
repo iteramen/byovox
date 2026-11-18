@@ -174,9 +174,11 @@ In the default `auto` mode byovox types the text as keystrokes, which leaves the
 and uses the clipboard only if typing fails (`src/platform/mod.rs` — `detect`;
 `src/platform/windows/inject.rs`):
 
-- **`paste`** saves the clipboard's text, puts the transcript there, presses Ctrl+V and puts the
-  saved text back 150 ms later (`PasteInject`). If the clipboard held something other than text
-  (an image, files) or nothing, it is not saved: it is replaced, and the transcript stays.
+- **`paste`** saves the clipboard's text, else its image, else its file list, puts the
+  transcript there, presses Ctrl+V and puts what it saved back 150 ms later (`PasteInject`,
+  `src/platform/windows/clipboard.rs`). An image comes back as a plain bitmap. If the clipboard
+  held only other formats (rich text, an app's own formats) or nothing, it is not saved: it is
+  replaced, and the transcript stays.
 - **`clipboard-only`** puts the transcript on the clipboard and leaves it there
   (`ClipboardOnlyInject`).
 
@@ -228,11 +230,11 @@ also welcome as [GitHub issues](https://github.com/iteramen/byovox/issues).
 With `[tts].enabled = true`, Ctrl+Alt+R reads the selected text aloud; dictation keeps its own
 shortcut. When you release the shortcut, byovox sends the app its Copy keys (Ctrl+C, or
 Ctrl+Insert in Windows Terminal), takes the text from the clipboard and puts your previous
-clipboard text back. While it is there, Windows clipboard history, cloud clipboard and clipboard
-managers can keep it; putting your text back does not undo that. Only text is put back: if the
-clipboard held an image or files, it holds the copied text afterwards. Nothing selected means
-nothing is read, except in Windows Terminal, where the clipboard's current text is read: a
-program that copies on select, such as herdr, has already put its selection there.
+clipboard text, image or file list back. While the copied text is there, Windows clipboard
+history, cloud clipboard and clipboard managers can keep it; putting your clipboard back does not
+undo that. If the clipboard held only other formats, it holds the copied text afterwards. Nothing
+selected means nothing is read, except in Windows Terminal, where the clipboard's current text is
+read: a program that copies on select, such as herdr, has already put its selection there.
 
 The text goes to your configured TTS endpoint, in chunks, with model, voice and speed
 (`read_aloud::synthesize`). The TTS server can retain it under its own policy. HTTPS verifies

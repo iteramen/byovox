@@ -1,4 +1,4 @@
-//! Read-aloud's selection: the app's own Copy, then the previous clipboard text back.
+//! Read-aloud's selection: the app's own Copy, then the previous clipboard back.
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::HWND;
@@ -11,12 +11,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
 };
 
+use super::clipboard::Saved;
 use super::hotkey::INJECT_MARKER;
 
 /// How long the app gets to put its Copy on the clipboard; no change means nothing was selected.
 const COPY_WAIT: Duration = Duration::from_millis(1000);
 
-/// Copies the selection in `window` and puts the clipboard's previous text back.
+/// Copies the selection in `window` and puts the clipboard's previous text, image or file list
+/// back.
 pub(crate) fn copy_selection(
     window: isize,
     trigger: u32,
@@ -32,7 +34,7 @@ pub(crate) fn copy_selection(
         .ok_or("Read aloud: this terminal is not supported; Windows Terminal is")?;
     let mut clipboard =
         arboard::Clipboard::new().map_err(|_| "Read aloud: clipboard unavailable; try again")?;
-    let previous = clipboard.get_text().ok();
+    let previous = Saved::of(&mut clipboard);
     // SAFETY: plain getter.
     let before = unsafe { GetClipboardSequenceNumber() };
     send_copy(chord)?;
@@ -43,15 +45,13 @@ pub(crate) fn copy_selection(
             return Err("Read aloud: cancelled".into());
         }
         if Instant::now() >= deadline {
-            return unchanged_clipboard(chord, previous);
+            return unchanged_clipboard(chord, previous.and_then(Saved::into_text));
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     let copied = clipboard.get_text();
-    if let Some(previous) = previous
-        && let Err(e) = clipboard.set_text(previous)
-    {
-        tracing::warn!(error = %e, "could not restore the previous clipboard text");
+    if let Some(previous) = previous {
+        previous.restore(&mut clipboard);
     }
     match copied {
         Ok(text) if !text.trim().is_empty() => Ok(text),

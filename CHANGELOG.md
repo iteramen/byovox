@@ -14,6 +14,9 @@ Changed
   instead of being typed as whatever whisper made of it (`*crickets*`). The test is now the
   95th-percentile 10 ms window at or under -40 dBFS, not every window; `byovox check` prints
   that level.
+- The `paste` rung and read aloud put back a clipboard image or file list, not only text, after
+  borrowing the clipboard. An image comes back as a plain bitmap; other formats are still not
+  restored.
 
 ## 0.7.0 — 2026-11-18
 
