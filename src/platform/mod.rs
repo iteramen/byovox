@@ -116,8 +116,13 @@ fn platform_detect(cfg: &Config, mode: InjectMode) -> Result<Backends> {
     use windows::inject::WinTarget;
     use windows::layout::WinLayout;
 
-    let hotkey =
+    let mut hotkey =
         HookHotkey::new(&cfg.hotkey.key, &cfg.hotkey.cancel_key).map_err(anyhow::Error::msg)?;
+    if cfg.tts.enabled {
+        hotkey = hotkey
+            .with_read_aloud(cfg.tts.effective_hotkey(), &cfg.hotkey.cancel_key)
+            .map_err(anyhow::Error::msg)?;
+    }
     let capture =
         crate::capture::CpalCapture::open(&cfg.capture.device).map_err(anyhow::Error::msg)?;
     let rungs = rungs_for(mode);

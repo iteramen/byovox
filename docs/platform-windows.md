@@ -404,3 +404,28 @@ Transcript text is logged only at `logging.level = "debug"`; at `info` the log c
 timings, the language sent and the rung used, never what you said. The capture log is the
 exception: with `capture_log.enabled = true` it stores every raw and polished transcript, by
 design — that is what it is for.
+
+## Read-aloud selection
+
+With TTS enabled, Ctrl+Alt+R is the separate narration shortcut. Empty legacy bindings
+resolve to that chord; overlapping dictation/narration triggers are rejected. A dedicated
+selection worker keeps the Copy off the action dispatcher, so dictation's release, Escape and
+Disable stay responsive. One pending read replaces old queued work; generation and
+pipeline-state checks reject late or busy results. Narration stops on another press of its
+shortcut or when a dictation starts, not on Escape. A failed read logs its message at WARN.
+
+The selection is the app's own Copy. byovox waits until the shortcut's keys are up (a Copy sent
+with Ctrl+Alt held reaches the app as Ctrl+Alt+C), checks that the window the shortcut was
+pressed in is still in front, sends Ctrl+C, and reads the clipboard's text once the clipboard
+changes, within one second. It then puts the previous clipboard text back; only text is
+restored. Windows Terminal (`CASCADIA_HOSTING_WINDOW_CLASS`) gets **Ctrl+Insert**: Ctrl+C there
+interrupts the running program when nothing is selected. With nothing selected, Terminal passes
+Ctrl+Insert on to the program, which may act on it. When the clipboard does not change in
+Windows Terminal, its current text is read: a program that copies on select (herdr) put
+its selection there already, and has no Copy key of its own. Other console hosts (`ConsoleWindowClass`, mintty, ConEmu) are
+refused. Apps decide what their Copy does: some, such as VS Code, copy the current line when
+nothing is selected.
+
+The native RegisterHotKey binding uses no repeat, checks configured modifier sides, reports
+conflicts, releases on Disable and reacquires on Enable. Reading uses the default Windows
+output.

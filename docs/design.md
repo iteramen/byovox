@@ -101,6 +101,10 @@ microphone, an unknown key name or a bad `inject.mode` refuses to start.
 1. **Press.** Read the layout, resolve the language, open the microphone, then record the
    target window (after the microphone, so the first syllable never waits on UI Automation).
 2. **Release.** Close the microphone; discard a tap, a cancel, an empty or silent capture.
+   Empty/silent audio after a real hold shows a four-second "no voice recorded" pill and a
+   Windows notification to check the microphone, mute switch and selected input. The fixed
+   explanation remains in `byovox status`; no audio is uploaded or inserted. Accidental short
+   taps and explicit cancellations stay quiet, and queued presses retain discard semantics.
 3. **Encode.** Downmix, resample to 16 kHz (box prefilter, linear interpolation), 16-bit WAV.
 4. **Transcribe.** Multipart POST to `{base_url}/audio/transcriptions`: `file`, `model`,
    `response_format`, language fields, `prompt` (`stt.prompt` or the lane's), and `vad=true` on
@@ -249,6 +253,42 @@ model is in [SECURITY.md](../SECURITY.md).
 - Linux (Wayland and X11) and macOS backends for every platform trait, and their autostart.
 - Linux and macOS release archives; until then `cargo install --git` builds from source.
 - A per-lane `hosted` flag: `hosted` exists only on `[stt]` and `[polish]`.
+
+## Read selected text aloud
+
+Narration uses its own native Ctrl+Alt+R binding by default. Empty legacy bindings resolve
+to that default; overlapping dictation/cancel triggers are rejected. The action dispatcher
+only queues narration requests, leaving dictation press/release/cancel responsive. One
+selection worker owns a replaceable pending HWND slot, reads only after admission checks,
+and checks cancellation and pipeline state again before preparing synthesis. The existing
+TTS worker retains its own single pending prepared-text slot. Generation fences suppress
+late lookup, playback and UI results. No shared-state lock is held across selection access.
+
+`selection_copy::copy_selection` is the selection: it waits for the shortcut's keys to be up,
+checks that the window the shortcut was pressed in is still in front, sends one marked Copy chord
+(Ctrl+C, or Ctrl+Insert in Windows Terminal; other consoles are refused), reads the clipboard's
+text once its sequence number changes, within one second, and puts the previous clipboard text
+back before returning. In Windows Terminal an unchanged clipboard is read as it is, for programs
+that copy on select.
+
+The action dispatcher stops TTS before forwarding a dictation press; Escape does not stop it. Pending forwarded
+pipeline actions remain counted until handled or drained, preventing a subsequent read action
+from starting in the gap before the pipeline has opened its microphone and updated state.
+One serial TTS worker and one pending selection bound work; generation checks fence player,
+completion and UI messages. Stop halts output immediately, clears pending text and discards late
+network replies. A blocking HTTP request can finish until its timeout, but cannot play afterwards.
+Playback uses the default output via rodio, never the microphone or dictation logs.
+
+`read_aloud::TtsConfig` defines English/default and separate HE/RU voice/endpoint/token lanes.
+The opening chunk is capped at 120 characters to reduce the wait for the first complete WAV;
+subsequent chunks retain the 500-character cap. This does not stream audio or prefetch later
+chunks: each subsequent request still starts after playback of the prior chunk ends.
+Dominant Latin/Hebrew/Cyrillic script selects a lane per chunk; unsupported scripts
+and missing voices refuse the whole selection before HTTP. The total is ≤20,000 code points.
+POST `/audio/speech` requests non-streaming PCM16 WAV with model, voice, input and speed. Both
+finite WAV lengths and Kokoro's RIFF/data streaming sentinels are accepted from a bounded body.
+Other malformed chunks, unsupported rates/channels/formats or >120 seconds per chunk are refused.
+HE/RU scaffolding does not imply configured or qualified HE/RU backends.
 
 ### Incomplete cleanup responses
 

@@ -5,14 +5,16 @@ use std::sync::mpsc::Sender;
 use std::sync::{Mutex, OnceLock};
 
 use windows::Win32::Foundation::{ERROR_HOTKEY_ALREADY_REGISTERED, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, HOT_KEY_MODIFIERS, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-    KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, RegisterHotKey, SendInput,
-    UnregisterHotKey, VIRTUAL_KEY,
+    KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, RegisterHotKey,
+    SendInput, UnregisterHotKey, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, KBDLLHOOKSTRUCT, MSG, SetWindowsHookExW,
-    TranslateMessage, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, KBDLLHOOKSTRUCT, MSG,
+    PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW, TranslateMessage,
+    WH_KEYBOARD_LL, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::hotkey::{
@@ -22,9 +24,23 @@ use crate::hotkey::{
 static SENDER: OnceLock<Mutex<Option<Sender<HotkeyEvent>>>> = OnceLock::new();
 static CHORD: OnceLock<Mutex<Option<ChordHook>>> = OnceLock::new();
 static CANCEL_VK: AtomicU32 = AtomicU32::new(0);
+static CONTEXTUAL: AtomicBool = AtomicBool::new(false);
 static ARMED: AtomicBool = AtomicBool::new(true);
+static HOOK_THREAD: AtomicU32 = AtomicU32::new(0);
+const READ_ARM_MESSAGE: u32 = WM_APP + 0x71;
+const READ_ID: i32 = 0x0B71;
 /// True once a hook is live: a second `run` would chain a hook that doubles every event.
 static INSTALLED: AtomicBool = AtomicBool::new(false);
+#[cfg(debug_assertions)]
+static READ_REGISTERED: AtomicBool = AtomicBool::new(false);
+/// Metadata-only diagnostics for an isolated debug shortcut fixture.
+#[cfg(debug_assertions)]
+pub fn read_hook_diagnostics() -> (bool, bool) {
+    (
+        INSTALLED.load(Ordering::SeqCst),
+        READ_REGISTERED.load(Ordering::Relaxed),
+    )
+}
 
 /// Stamped into `dwExtraInfo` of every event `platform::windows::inject` sends, so the hook
 /// can tell our own synthetic keys from the user's. The hook cannot filter `LLKHF_INJECTED`
@@ -38,6 +54,11 @@ const DEFUSE_VK: u16 = 0xFF;
 
 pub fn set_armed(on: bool) {
     ARMED.store(on, Ordering::Relaxed);
+    let thread = HOOK_THREAD.load(Ordering::Relaxed);
+    if thread != 0 {
+        // SAFETY: this private message updates only our own hook-thread registration.
+        let _ = unsafe { PostThreadMessageW(thread, READ_ARM_MESSAGE, WPARAM(0), LPARAM(0)) };
+    }
 }
 
 fn sender_slot() -> &'static Mutex<Option<Sender<HotkeyEvent>>> {
@@ -91,6 +112,8 @@ pub struct HookHotkey {
     chord: Chord,
     vks: Vec<u32>,
     cancel_vk: u32,
+    read: Option<Chord>,
+    contextual: bool,
 }
 
 fn hot_key_modifier(name: &str) -> Option<HOT_KEY_MODIFIERS> {
@@ -162,7 +185,31 @@ impl HookHotkey {
             chord,
             vks,
             cancel_vk,
+            read: None,
+            contextual: false,
         })
+    }
+
+    pub fn with_read_aloud(mut self, key: &str, cancel: &str) -> Result<Self, String> {
+        let other = Self::new(key, cancel)?;
+        if hot_key_modifier(&other.chord.trigger).is_some() {
+            return Err("tts.hotkey: use a non-modifier trigger key".into());
+        }
+        if other
+            .chord
+            .modifiers
+            .iter()
+            .any(|name| hot_key_modifier(name).is_none())
+        {
+            return Err("tts.hotkey: use Ctrl/Alt/Shift/Win modifiers with a trigger key".into());
+        }
+        self.read = Some(other.chord);
+        Ok(self)
+    }
+
+    pub fn with_contextual_read_aloud(mut self) -> Self {
+        self.contextual = true;
+        self
     }
 }
 
@@ -253,7 +300,15 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                         if ev == HotkeyEvent::Pressed && step.swallow {
                             defuse_modifiers();
                         }
-                        emit(ev);
+                        emit(
+                            if ev == HotkeyEvent::Pressed && CONTEXTUAL.load(Ordering::Relaxed) {
+                                HotkeyEvent::ContextPressed(
+                                    unsafe { GetForegroundWindow() }.0 as isize,
+                                )
+                            } else {
+                                ev
+                            },
+                        );
                     }
                     if step.swallow {
                         return LRESULT(1);
@@ -279,25 +334,85 @@ impl Hotkey for HookHotkey {
             chord,
             vks,
             cancel_vk,
+            read,
+            contextual,
         } = *self;
         let tracker = ChordTracker::new(&chord);
         *chord_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(ChordHook { vks, tracker });
         CANCEL_VK.store(cancel_vk, Ordering::Relaxed);
+        CONTEXTUAL.store(contextual, Ordering::Relaxed);
         *sender_slot().lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
         // SAFETY: standard hook installation; the hook is removed when the process exits.
         let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0) };
         if let Err(e) = hook {
             tracing::error!(error = %e, "SetWindowsHookExW failed");
-            *sender_slot().lock().unwrap_or_else(|p| p.into_inner()) = None;
-            return;
+        } else {
+            INSTALLED.store(true, Ordering::SeqCst);
         }
-        INSTALLED.store(true, Ordering::SeqCst);
+        let register = |chord: &Chord| {
+            let flags = chord.modifiers.iter().fold(MOD_NOREPEAT, |flags, name| {
+                flags | hot_key_modifier(name).expect("validated modifier")
+            });
+            // SAFETY: registration belongs to this message-pump thread and is removed below.
+            match unsafe {
+                RegisterHotKey(
+                    None,
+                    READ_ID,
+                    flags,
+                    vk_for(&chord.trigger).expect("validated trigger"),
+                )
+            } {
+                Ok(()) => true,
+                Err(_) => {
+                    emit(HotkeyEvent::ReadAloudUnavailable);
+                    false
+                }
+            }
+        };
         let mut msg = MSG::default();
+        // Create the thread queue before publishing its ID for Enable/Disable messages.
+        unsafe {
+            let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+        }
+        HOOK_THREAD.store(unsafe { GetCurrentThreadId() }, Ordering::Relaxed);
+        let mut registered = ARMED.load(Ordering::Relaxed) && read.as_ref().is_some_and(register);
+        #[cfg(debug_assertions)]
+        READ_REGISTERED.store(registered, Ordering::Relaxed);
         // SAFETY: plain message pump on this thread; GetMessageW returns 0 on WM_QUIT.
         unsafe {
-            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
+                if msg.message == READ_ARM_MESSAGE {
+                    if !ARMED.load(Ordering::Relaxed) && registered {
+                        let _ = UnregisterHotKey(None, READ_ID);
+                        registered = false;
+                    } else if ARMED.load(Ordering::Relaxed) && !registered {
+                        registered = read.as_ref().is_some_and(register);
+                    }
+                    #[cfg(debug_assertions)]
+                    READ_REGISTERED.store(registered, Ordering::Relaxed);
+                    continue;
+                }
+                if registered && msg.message == WM_HOTKEY && msg.wParam.0 == READ_ID as usize {
+                    // Windows registers generic modifiers; honor the configured left/right sides.
+                    let sides_held = read.as_ref().is_some_and(|chord| {
+                        chord.modifiers.iter().all(|name| {
+                            GetAsyncKeyState(vk_for(name).expect("validated modifier") as i32)
+                                as u16
+                                & 0x8000
+                                != 0
+                        })
+                    });
+                    if sides_held && ARMED.load(Ordering::Relaxed) {
+                        emit(HotkeyEvent::ReadAloud(GetForegroundWindow().0 as isize));
+                    }
+                    continue;
+                }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
+            }
+            HOOK_THREAD.store(0, Ordering::Relaxed);
+            if registered {
+                let _ = UnregisterHotKey(None, READ_ID);
             }
         }
     }
@@ -306,6 +421,22 @@ impl Hotkey for HookHotkey {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registered_read_chords_accept_native_modifiers_only() {
+        assert!(
+            HookHotkey::new("ControlRight", "Escape")
+                .unwrap()
+                .with_read_aloud("ControlLeft+AltLeft+R", "Escape")
+                .is_ok()
+        );
+        assert!(
+            HookHotkey::new("ControlRight", "Escape")
+                .unwrap()
+                .with_read_aloud("CapsLock+R", "Escape")
+                .is_err()
+        );
+    }
 
     #[test]
     fn w3c_names_map_to_virtual_keys() {

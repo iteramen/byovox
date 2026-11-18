@@ -6,3 +6,5 @@ pub mod autostart;
 pub mod hotkey;
 pub mod inject;
 pub mod layout;
+
+pub(crate) mod selection_copy;

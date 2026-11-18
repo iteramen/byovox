@@ -19,6 +19,8 @@ pub mod ollama;
 pub mod pipeline;
 pub mod platform;
 pub mod polish;
+pub mod read_aloud;
+pub mod read_aloud_runtime;
 pub mod server;
 pub mod setup;
 pub mod stt;

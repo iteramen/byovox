@@ -219,3 +219,36 @@ Full threat model: [SECURITY.md](SECURITY.md). Windows specifics:
 
 License: [PolyForm Noncommercial 1.0.0](LICENSE). Free for personal use and for noncommercial
 organisations; any commercial use needs a license — byovox.licensing@gmail.com.
+
+## Read selected text aloud (Windows)
+
+Read aloud is off by default. Configure `[tts]` in your TOML (see
+[the example](docs/config.example.toml)), set `enabled = true`, and restart byovox:
+
+```toml
+[tts]
+enabled = true
+hotkey = "ControlLeft+AltLeft+R"
+base_url = "http://<tailnet-host>:8770/v1"
+model = "kokoro"
+voice = "af_bella"
+```
+
+Select text and press Ctrl+Alt+R to read it aloud. Press again to stop; starting a dictation
+stops it too, Escape does not. Dictation keeps its own shortcut; an empty `tts.hotkey` uses
+Ctrl+Alt+R, and a binding that overlaps dictation's is rejected.
+
+When you release the shortcut, byovox copies the selection with the app's own Copy (Ctrl+C, or
+Ctrl+Insert in Windows Terminal, where Ctrl+C would interrupt the program), then puts your
+previous clipboard text back. Stay in the window until it starts reading, then go where you
+like. Nothing selected means nothing is read. In Windows Terminal, a program that copies on
+select, such as herdr, has already put its selection on the clipboard, so that text is read.
+Other console windows are not supported. While
+the text is on the clipboard, Windows clipboard history and sync can keep it. The text goes to
+your TTS server, which can retain requests under its own policy; byovox never types, records or
+saves it.
+
+English is the first target. Hebrew/Russian endpoint and voice slots need supported server
+voices; a missing voice refuses reading, with no English substitution. Routing is by dominant
+script per chunk, not language detection: Latin-script text uses English. `byovox check` reports
+the configuration only and does not try a read.

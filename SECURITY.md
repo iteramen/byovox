@@ -106,3 +106,39 @@ If any of the above matters to you:
 - Leave `logging.level = "info"`. `debug` writes your transcripts to disk.
 - Prefer the `type` rung over `paste` if clipboard history or cloud clipboard sync is on.
 - Review what your polish endpoint is: it sees every transcript before you do.
+
+### Read aloud
+
+Read aloud is off by default (`tts.enabled`). Its shortcut, Ctrl+Alt+R unless set otherwise, may
+not overlap dictation's keys. On the press, byovox waits until the shortcut's keys are released,
+then sends Copy to the window the shortcut was pressed in, if that window is still in front:
+Ctrl+C, or Ctrl+Insert in Windows Terminal, where Ctrl+C would interrupt the running program.
+Other console windows are refused. byovox reads the clipboard's text once the clipboard changes,
+within one second, and puts the previous clipboard text back. No change means nothing was
+selected, and nothing is read, except in Windows Terminal: a program there that copies on
+select (herdr) already put its selection on the clipboard, so the clipboard's current
+text is read. Only text is restored: a clipboard that held an image or files
+holds the copied text afterwards. The text passes through the clipboard, so Windows clipboard
+history, cloud clipboard and clipboard managers can see it. At most 20,000 characters are read.
+
+All ≤500-character chunks and dominant-script routes are prepared before any request. HE/RU need
+configured voices; unknown dominant scripts and missing routes fail without a partial upload.
+TTS has separate bearer-token references. A lane inherits the default TTS token only explicitly;
+STT/cleanup tokens are unused. HTTP(S) bases reject embedded credentials, queries and fragments.
+Redirects are disabled, and server bodies never reach errors/logs. Each response is bounded to
+12 MiB and PCM16 mono/stereo WAV at 8–48 kHz, ≤120 seconds. Known streaming length sentinels are
+completed from the bounded body; arbitrary truncation/oversized declarations are rejected.
+
+One selection worker and one synthesis worker, each with one replaceable pending slot, and a
+generation fence prevent unbounded queued text and late playback/UI updates. Another press of
+the shortcut or starting a dictation clears pending work and stops the player; Disable refuses
+new reads. A blocking network request may finish until its timeout, but cannot play. Queued pipeline actions
+are counted until handled/drained so TTS cannot start before a pending microphone action becomes
+visible in pipeline state. Selected text and audio never enter `last`, capture logs, other logs
+or files.
+
+In scope: text read without a narration press; text copied from a window other than the one the
+shortcut was pressed in; credentials redirected or inherited without consent; selected text or
+audio persisted or echoed by errors; audio played after cancellation. The configured TTS
+server's retention and what an app puts on the clipboard for its own Copy are outside the
+client boundary.

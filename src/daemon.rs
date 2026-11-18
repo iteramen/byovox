@@ -220,6 +220,40 @@ fn start(cfg: Config, path: PathBuf) -> Result<()> {
     let shared = pipe.shared();
 
     let (tx, rx) = channel::<hotkey::HotkeyEvent>();
+    let manager =
+        crate::read_aloud_runtime::Manager::new(cfg.tts.clone(), shared.clone(), proxy.clone())?;
+    let (dispatch_tx, dispatch_rx) = channel::<hotkey::HotkeyEvent>();
+    let pipeline_tx = tx;
+    let action_state = shared.clone();
+    std::thread::Builder::new()
+        .name("byovox-actions".into())
+        .spawn(move || {
+            while let Ok(event) = dispatch_rx.recv() {
+                // Old contextual events, if supplied by a backend, retain dictation semantics.
+                let event = match event {
+                    hotkey::HotkeyEvent::ContextPressed(_) => hotkey::HotkeyEvent::Pressed,
+                    event => event,
+                };
+                match event {
+                    hotkey::HotkeyEvent::ReadAloud(window) => manager.toggle(window),
+                    hotkey::HotkeyEvent::ReadAloudUnavailable => manager.unavailable(),
+                    other => {
+                        if stops_narration(&other) {
+                            manager.stop();
+                        }
+                        action_state
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .pending_actions += 1;
+                        if pipeline_tx.send(other).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            manager.stop();
+        })?;
+    let tx = dispatch_tx;
     let backend_tx = tx.clone();
     let ui_tx = tx.clone();
     let ipc_shared = shared.clone();
@@ -402,8 +436,26 @@ fn init_logging(
     Ok(guard)
 }
 
+/// Only a dictation starting stops narration (mic and speaker must not overlap); Escape is
+/// pressed in other apps while listening, so it cancels dictation alone.
+fn stops_narration(event: &hotkey::HotkeyEvent) -> bool {
+    matches!(
+        event,
+        hotkey::HotkeyEvent::Pressed | hotkey::HotkeyEvent::Toggle
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn escape_does_not_stop_narration_but_a_dictation_does() {
+        use crate::hotkey::HotkeyEvent;
+        assert!(!super::stops_narration(&HotkeyEvent::Cancel));
+        assert!(!super::stops_narration(&HotkeyEvent::Released));
+        assert!(super::stops_narration(&HotkeyEvent::Pressed));
+        assert!(super::stops_narration(&HotkeyEvent::Toggle));
+    }
+
     use super::*;
     use crate::stt::Transcriber;
     use crate::testutil::{MockServer, auth_header};

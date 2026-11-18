@@ -1,6 +1,6 @@
 # Privacy policy — byovox
 
-**Effective: 2026-10-10.**
+**Effective: 2026-11-18.**
 
 byovox is a Windows push-to-talk dictation tool. You hold a hotkey, speak, release, and the
 transcript is typed into the window you were in. byovox runs no server of its own and has no
@@ -222,3 +222,32 @@ here.
 
 Questions about this policy or your data: byovox.licensing@gmail.com. Non-sensitive questions are
 also welcome as [GitHub issues](https://github.com/iteramen/byovox/issues).
+
+## Optional read aloud
+
+With `[tts].enabled = true`, Ctrl+Alt+R reads the selected text aloud; dictation keeps its own
+shortcut. When you release the shortcut, byovox sends the app its Copy keys (Ctrl+C, or
+Ctrl+Insert in Windows Terminal), takes the text from the clipboard and puts your previous
+clipboard text back. While it is there, Windows clipboard history, cloud clipboard and clipboard
+managers can keep it; putting your text back does not undo that. Only text is put back: if the
+clipboard held an image or files, it holds the copied text afterwards. Nothing selected means
+nothing is read, except in Windows Terminal, where the clipboard's current text is read: a
+program that copies on select, such as herdr, has already put its selection there.
+
+The text goes to your configured TTS endpoint, in chunks, with model, voice and speed
+(`read_aloud::synthesize`). The TTS server can retain it under its own policy. HTTPS verifies
+certificates; remote HTTP is possible and `byovox check` warns about it. Use a trusted encrypted
+connection for private text.
+
+TTS credentials are separate from STT/cleanup. A language lane receives only its own configured
+token unless `inherit_token = true` explicitly selects the default TTS credential. Requests follow
+no redirects. Selected text, generated audio and server response bodies are never written to logs,
+files, capture history or `byovox last`, even at debug level. Only fixed status and failure
+messages are shown, and a failure is logged with that message alone. The TOML retains non-secret
+TTS configuration and token references.
+
+Another press of the shortcut, or starting a dictation, stops reading; Escape does not. Audio
+stops and late replies are discarded, though a request already received by the server can finish
+there. Reading never opens the microphone. Hebrew/Russian configuration slots require supported
+voices and do not reuse an English voice silently. Dominant script chooses the route, so
+Latin-script text uses the English/default route rather than a semantic language detector.

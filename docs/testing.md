@@ -90,3 +90,30 @@ map out, so every row below would log `auto`.
 - [ ] with a Bluetooth headset connected as the default recording device and `capture.device = "Microphone Array"`: `check`'s `mic` row names the array at 48 kHz, and a dictation leaves music in the headphones untouched (no pitch jump on press or release); a name that matches nothing → exit 2 listing the devices
 - [ ] tray menu, Microphone: it lists System default and every input by its full name, the one in use checked; plug a USB mic in or out and reopen the menu — the list follows. Pick one: config.toml's `capture.device` holds its full name, the next dictation records from it (`check`'s `mic` row names it), and the other keys and comment lines are unchanged (a comment at the end of the `device` line itself is dropped); pick System default → `device = ""`
 - [ ] `byovox setup`'s closing microphone level step, Enter at the offer: stay quiet for the 3 s floor capture, then speak a sentence for the 5 s one — the floor prints with no warning, and a normal speaking volume prints neither "this quiet, byovox would discard the dictation" nor "this level is low" nor "clipping". Repeat muted or very quiet → "this quiet, byovox would discard the dictation"; repeat close to the mic at high volume → "clipping". `n` at the offer skips straight to the closing `check`
+
+## Read aloud (manual, Windows)
+
+With `[tts]` enabled and a reachable TTS server:
+
+- [ ] WhatsApp, Notepad and a browser page: select a paragraph, Ctrl+Alt+R reads it, a second press stops it
+- [ ] press Ctrl+Alt+R, switch windows once reading starts, press Escape there: it keeps reading
+- [ ] nothing selected: `select text first`, nothing is read, the clipboard is unchanged
+- [ ] the text on the clipboard before a read is back on it afterwards
+- [ ] Windows Terminal with a selection: it reads; with none, the running program is not interrupted
+- [ ] herdr in Windows Terminal: drag-select in a pane, Ctrl+Alt+R reads that text
+- [ ] a classic console window (cmd.exe in conhost): refused with `this terminal is not supported`
+- [ ] start a dictation while it reads: reading stops before the microphone opens
+- [ ] a failed read leaves one WARN `read aloud failed` line in the log and no selected text
+
+## No-voice dictation feedback
+
+Owner confirmed dictation text lands after choosing a physical input, then specified fifine as
+the intended microphone. Local config now uses the exact "Microphone (fifine Microphone)" name;
+other settings were preserved. Generic "Microphone" had selected tranScreen virtual audio.
+
+Regression 5b68f71 fails the missing feedback for empty and silent captures. Both now retain
+Outcome::Discarded (no STT upload/insertion) while reporting NoVoice: a four-second pill and
+Windows notification with a fixed actionable message. Existing optional error cues apply;
+short taps/cancels do not gain a notification. Tests assert NoVoice/status and no request,
+check that short taps stay Idle, and verify the pill text fits the Windows font/width.
+Native muted-microphone notice and normal fifine dictation checks remain pending.
