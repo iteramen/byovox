@@ -100,6 +100,7 @@ With `[tts]` enabled and a reachable TTS server:
 - [ ] nothing selected: `select text first`, nothing is read, the clipboard is unchanged
 - [ ] the text on the clipboard before a read is back on it afterwards
 - [ ] Windows Terminal with a selection: it reads; with none, the running program is not interrupted
+- [ ] herdr in Windows Terminal: drag-select in a pane, Ctrl+Alt+R reads that text
 - [ ] a classic console window (cmd.exe in conhost): refused with `this terminal is not supported`
 - [ ] start a dictation while it reads: reading stops before the microphone opens
 - [ ] a failed read leaves one WARN `read aloud failed` line in the log and no selected text

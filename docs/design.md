@@ -268,7 +268,8 @@ late lookup, playback and UI results. No shared-state lock is held across select
 checks that the window the shortcut was pressed in is still in front, sends one marked Copy chord
 (Ctrl+C, or Ctrl+Insert in Windows Terminal; other consoles are refused), reads the clipboard's
 text once its sequence number changes, within one second, and puts the previous clipboard text
-back before returning.
+back before returning. In Windows Terminal an unchanged clipboard is read as it is, for programs
+that copy on select.
 
 The action dispatcher stops TTS before forwarding a dictation press; Escape does not stop it. Pending forwarded
 pipeline actions remain counted until handled or drained, preventing a subsequent read action

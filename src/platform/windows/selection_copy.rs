@@ -43,7 +43,7 @@ pub(crate) fn copy_selection(
             return Err("Read aloud: cancelled".into());
         }
         if Instant::now() >= deadline {
-            return Err("Read aloud: select text first".into());
+            return unchanged_clipboard(chord, previous);
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -55,6 +55,15 @@ pub(crate) fn copy_selection(
     }
     match copied {
         Ok(text) if !text.trim().is_empty() => Ok(text),
+        _ => Err("Read aloud: select text first".into()),
+    }
+}
+
+/// Nothing new was copied. A program in Windows Terminal that copies on select (herdr) has
+/// already put its selection on the clipboard, and Terminal forwards Ctrl+Insert to it unused.
+fn unchanged_clipboard(chord: CopyChord, current: Option<String>) -> Result<String, String> {
+    match current {
+        Some(text) if chord == CopyChord::WindowsTerminal && !text.trim().is_empty() => Ok(text),
         _ => Err("Read aloud: select text first".into()),
     }
 }
@@ -190,6 +199,28 @@ mod tests {
         assert_eq!(
             copy_chord("Notepad++", "Scintilla"),
             Some(CopyChord::Desktop)
+        );
+    }
+
+    #[test]
+    fn only_windows_terminal_reads_a_clipboard_its_copy_left_unchanged() {
+        let text = || Some("selected in herdr".to_string());
+        assert_eq!(
+            unchanged_clipboard(CopyChord::WindowsTerminal, text()).as_deref(),
+            Ok("selected in herdr")
+        );
+        assert!(unchanged_clipboard(CopyChord::Desktop, text()).is_err());
+        assert!(unchanged_clipboard(CopyChord::WindowsTerminal, None).is_err());
+        assert!(
+            unchanged_clipboard(
+                CopyChord::WindowsTerminal,
+                Some(
+                    " 
+"
+                    .into()
+                )
+            )
+            .is_err()
         );
     }
 

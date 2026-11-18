@@ -420,7 +420,9 @@ pressed in is still in front, sends Ctrl+C, and reads the clipboard's text once 
 changes, within one second. It then puts the previous clipboard text back; only text is
 restored. Windows Terminal (`CASCADIA_HOSTING_WINDOW_CLASS`) gets **Ctrl+Insert**: Ctrl+C there
 interrupts the running program when nothing is selected. With nothing selected, Terminal passes
-Ctrl+Insert on to the program, which may act on it. Other console hosts (`ConsoleWindowClass`, mintty, ConEmu) are
+Ctrl+Insert on to the program, which may act on it. When the clipboard does not change in
+Windows Terminal, its current text is read: a program that copies on select (herdr) put
+its selection there already, and has no Copy key of its own. Other console hosts (`ConsoleWindowClass`, mintty, ConEmu) are
 refused. Apps decide what their Copy does: some, such as VS Code, copy the current line when
 nothing is selected.
 

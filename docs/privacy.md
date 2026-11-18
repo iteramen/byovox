@@ -231,7 +231,8 @@ Ctrl+Insert in Windows Terminal), takes the text from the clipboard and puts you
 clipboard text back. While it is there, Windows clipboard history, cloud clipboard and clipboard
 managers can keep it; putting your text back does not undo that. Only text is put back: if the
 clipboard held an image or files, it holds the copied text afterwards. Nothing selected means
-nothing is read.
+nothing is read, except in Windows Terminal, where the clipboard's current text is read: a
+program that copies on select, such as herdr, has already put its selection there.
 
 The text goes to your configured TTS endpoint, in chunks, with model, voice and speed
 (`read_aloud::synthesize`). The TTS server can retain it under its own policy. HTTPS verifies

@@ -115,7 +115,9 @@ then sends Copy to the window the shortcut was pressed in, if that window is sti
 Ctrl+C, or Ctrl+Insert in Windows Terminal, where Ctrl+C would interrupt the running program.
 Other console windows are refused. byovox reads the clipboard's text once the clipboard changes,
 within one second, and puts the previous clipboard text back. No change means nothing was
-selected, and nothing is read. Only text is restored: a clipboard that held an image or files
+selected, and nothing is read, except in Windows Terminal: a program there that copies on
+select (herdr) already put its selection on the clipboard, so the clipboard's current
+text is read. Only text is restored: a clipboard that held an image or files
 holds the copied text afterwards. The text passes through the clipboard, so Windows clipboard
 history, cloud clipboard and clipboard managers can see it. At most 20,000 characters are read.
 
