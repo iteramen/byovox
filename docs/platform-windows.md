@@ -121,12 +121,14 @@ about.
 Windows "audio enhancements" (Settings → System → Sound → the input device → Audio
 enhancements) can attenuate a microphone by as much as 30 dB, and laptop array mics often ship
 with them on. The symptom is rarely plain silence: transcripts come back empty, or as one
-hallucinated stock phrase. A capture with no 10 ms window above -40 dBFS RMS is not sent at
-all: nothing is typed, no cue plays, and the log has one `silent capture discarded` line.
+hallucinated stock phrase. A capture whose 95th-percentile 10 ms window is at or under -40 dBFS
+RMS is not sent at all: nothing is typed, no cue plays, and the log has one `silent capture
+discarded` line. A few loud windows, such as a tap on the desk, do not make room tone count as
+voice.
 
-`byovox check` records a second and prints the peak and the loudest 10 ms window's RMS, e.g.
-`peak -27.3 dBFS, loudest 10 ms -29.10 dBFS RMS over 0.8s`. The row keeps its `ok` mark and adds
-an inline `← …` note when that window is at or under -40 dBFS — the same test the pipeline
+`byovox check` records a second and prints the peak and the 95th-percentile 10 ms window's RMS,
+e.g. `peak -27.3 dBFS, 95th-pct 10 ms -29.10 dBFS RMS over 0.8s`. The row keeps its `ok` mark and
+adds an inline `← …` note when that window is at or under -40 dBFS — the same test the pipeline
 applies. If a normal speaking voice reads anywhere near -40, turn the enhancements off for that
 device and run `check` again.
 

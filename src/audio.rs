@@ -15,8 +15,9 @@ const CLICK_WINDOW: usize = SAMPLE_RATE as usize / 100;
 /// stops, and what makes a window tail quiet enough to drop.
 const ROOM_TONE_DBFS: f32 = -30.0;
 
-/// Silence: a capture at or under this RMS level in every 10 ms window came from a muted or dead
-/// microphone. Quiet dictation and live-microphone room tone both peak above it.
+/// Silence: a capture whose 95th-percentile 10 ms window is at or under this RMS level holds no
+/// voice: a muted or dead microphone, or room tone with a few taps or clicks. Quiet dictation
+/// sits above it.
 const SILENT_CAPTURE_DBFS: f32 = -40.0;
 
 const WHISPER_WINDOW: usize = SAMPLE_RATE as usize * 30;
@@ -101,9 +102,7 @@ impl Audio {
     }
 
     pub fn is_silent(&self) -> bool {
-        self.samples
-            .chunks(CLICK_WINDOW)
-            .all(|w| rms_dbfs(w) <= SILENT_CAPTURE_DBFS)
+        self.window_percentile_dbfs(95.0) <= SILENT_CAPTURE_DBFS
     }
 
     pub fn loudest_window_dbfs(&self) -> f32 {
@@ -200,8 +199,17 @@ mod tests {
             .collect()
     }
 
+    fn windows_at(levels: &[(f32, usize)]) -> Audio {
+        let mut samples = Vec::new();
+        for &(dbfs, count) in levels {
+            let amp = (i16::MAX as f32 * 10f32.powf(dbfs / 20.0)).round() as i16;
+            samples.extend(std::iter::repeat_n(amp, CLICK_WINDOW * count));
+        }
+        Audio { samples }
+    }
+
     #[test]
-    fn only_a_capture_silent_in_every_window_is_silent() {
+    fn a_capture_is_silent_when_its_95th_percentile_window_is() {
         let zero = Audio {
             samples: vec![0; 16_000 + 80],
         };
@@ -215,7 +223,18 @@ mod tests {
             *s = 8000;
         }
         let loud_tail = Audio { samples: loud_tail };
-        assert!(!loud_tail.is_silent(), "a loud final partial window");
+        assert!(loud_tail.is_silent(), "one loud final partial window");
+    }
+
+    #[test]
+    fn taps_on_room_tone_are_silent_and_a_short_quiet_word_is_not() {
+        // Room tone with table taps typed `*crickets*`: 95th percentile -45, loudest -32.
+        let taps = windows_at(&[(-50.0, 460), (-45.0, 20), (-32.0, 20)]);
+        assert!(taps.loudest_window_dbfs() > -40.0);
+        assert!(taps.is_silent(), "{}", taps.window_percentile_dbfs(95.0));
+        // A short word over the same room: 6 % of the windows at -33.
+        let word = windows_at(&[(-50.0, 470), (-33.0, 30)]);
+        assert!(!word.is_silent(), "{}", word.window_percentile_dbfs(95.0));
     }
 
     #[test]

@@ -461,15 +461,15 @@ pub fn run(cfg: &Config, config_path: &Path) -> bool {
 /// Warns on `a.is_silent()`, `Pipeline::finish`'s own test, so the row cannot drift from it.
 fn mic_row_detail(a: &Audio) -> String {
     let warn = if a.is_silent() {
-        "  ← a dictation this quiet is discarded as silent (no 10 ms window above −40 dBFS): \
+        "  ← a dictation this quiet is discarded as silent (95th-pct 10 ms at or under −40 dBFS): \
          muted, or an OS audio enhancement attenuating the mic"
     } else {
         ""
     };
     format!(
-        "peak {:.1} dBFS, loudest 10 ms {:.2} dBFS RMS over {:.1}s{warn}",
+        "peak {:.1} dBFS, 95th-pct 10 ms {:.2} dBFS RMS over {:.1}s{warn}",
         a.peak_dbfs(),
-        a.loudest_window_dbfs(),
+        a.window_percentile_dbfs(95.0),
         a.duration_secs()
     )
 }

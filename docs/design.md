@@ -39,7 +39,7 @@ logic lives in the library ([src/lib.rs](../src/lib.rs)).
 Idle ──press──▶ Recording ──release──▶ Transcribing ──▶ Polishing ──▶ Inserting ──▶ Idle
                     │ held < hotkey.min_hold_ms                → discard, no request
                     │ hotkey.cancel_key                        → discard
-                    │ empty, or no 10 ms window above -40 dBFS → discard, no request
+                    │ empty, or 95th-pct 10 ms window ≤ -40 dBFS → discard, no request
 Transcribing error → Idle, nothing inserted, error indication
 Polishing error    → Inserting with the raw transcript, error indication
 Inserting error    → next inject rung; past the last, held for `byovox last`
