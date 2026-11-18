@@ -137,7 +137,11 @@ fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
 pub(super) fn terminal_in_front() -> bool {
     // SAFETY: getter; the handle is used for class lookups only.
     let window = unsafe { GetForegroundWindow() };
-    copy_chord(&class(window), &class(focused(window))) != Some(CopyChord::Desktop)
+    is_terminal(&class(window), &class(focused(window)))
+}
+
+fn is_terminal(root: &str, focused: &str) -> bool {
+    copy_chord(root, focused) != Some(CopyChord::Desktop)
 }
 
 fn copy_inputs(chord: CopyChord) -> Vec<INPUT> {
@@ -208,6 +212,24 @@ mod tests {
             copy_chord("Notepad++", "Scintilla"),
             Some(CopyChord::Desktop)
         );
+    }
+
+    #[test]
+    fn every_recognised_terminal_gets_no_line_break_and_a_desktop_app_does() {
+        for name in [
+            "CASCADIA_HOSTING_WINDOW_CLASS",
+            "ConsoleWindowClass",
+            "mintty",
+            "VirtualConsoleClass",
+        ] {
+            assert!(is_terminal(name, "child"), "{name}");
+            assert!(is_terminal("root", name), "{name}");
+        }
+        assert!(!is_terminal("Notepad", "RichEditD2DPT"));
+        assert!(!is_terminal(
+            "Chrome_WidgetWin_1",
+            "Chrome_RenderWidgetHostHWND"
+        ));
     }
 
     #[test]
