@@ -11,7 +11,7 @@ and one TOML file. Only Windows has backends: the crate builds and tests on Linu
 
 - **Any OpenAI-compatible server.** `/v1/audio/transcriptions` for speech,
   `/v1/chat/completions` for cleanup. `language_candidates` is an optional whisper.cpp server
-  extension; servers without it ignore the field.
+  extension; a server that refuses it with a 4xx naming the field is not sent it again that run.
 - **Detect, then route.** Detection among candidate languages, a confident detection re-sent
   to that language's own endpoint, the keyboard layout as the hint when detection is unsure.
 - **Never lossy.** Once a transcript exists, every later failure still ends in an insert
@@ -86,7 +86,7 @@ elevated windows, is in [platform-windows.md](platform-windows.md).
 | Hotkey | `WH_KEYBOARD_LL` hook: any key, a bare modifier, or a held chord (releasing any member ends it). A chord's trigger is swallowed; a bare key and a chord's modifiers still reach the window. |
 | Capture | `cpal`/WASAPI, open only while recording; `capture.device` pins an input. The start click and a quiet sub-second tail past the last 30 s multiple are cut ([src/audio.rs](../src/audio.rs)). |
 | Layout | foreground window's layout LANGID → ISO 639-1. |
-| Inject | `type` (`SendInput` + `KEYEVENTF_UNICODE`), `paste` (clipboard + Ctrl+V, previous clipboard text restored), `clipboard-only`. |
+| Inject | `type` (`SendInput` + `KEYEVENTF_UNICODE`), `paste` (clipboard + Ctrl+V, previous clipboard text, image or file list restored), `clipboard-only`. |
 | Target | top-level window of the UI Automation focused element at press, brought back before typing. Closed, hidden or cloaked by then: nothing is typed. |
 | Indicator | tray (`tray-icon`), pill (`winit` + `softbuffer`), cues (`rodio`, synthesised). |
 
@@ -121,7 +121,10 @@ microphone, an unknown key name or a bad `inject.mode` refuses to start.
    the raw transcript is typed, with the error cue and a WARN.
 7. **Sanitise, then inject.** [`pipeline::sanitize`](../src/pipeline.rs) turns `\n`, U+2028 and
    U+2029 into spaces and drops all other control and format (`Cf`) characters except LRM/RLM
-   and ZWJ/ZWNJ, logging only the count. Then trim, strip one terminal `.` (never an ellipsis, `?`
+   and ZWJ/ZWNJ, logging only the count. With `polish.line_breaks` each `\n`-separated line is
+   sanitised on its own and the `\n` kept; only the `type` rung receives it, as Shift+Enter
+   (a space in a Windows Terminal, console, mintty or ConEmu window), and every other rung gets
+   a space. Then trim, strip one terminal `.` (never an ellipsis, `?`
    or `!`) unless `inject.strip_terminal_period = false`, append a space if
    `inject.trailing_space`, restore the target window (with nothing focused at press: go on
    only if focus is now in a text field), and run the rungs. The done cue plays only for
@@ -168,6 +171,9 @@ payload is declared content, never instructions.
 - `polish.capitalize_first_word = false` swaps rule 1 for `LOWERCASE_FIRST_RULE` and gives a
   lower-cased first-word "I" its capital back. A `polish.prompt_file` replaces the prompt
   verbatim and is never rewritten.
+- `polish.line_breaks = true` appends `LINE_BREAK_RULE` to rule 8: a spoken "new line" or "new
+  paragraph" (and their Russian and Hebrew equivalents) becomes a line break. Rules keep their
+  numbers, so the glossary rule stays 10.
 - `polish::prompt_for` appends a glossary rule carrying `stt.prompt` and every lane `prompt`,
   so transliterated technical terms come back in Latin.
 - Rule changes are measured: [bench/polish_bench.py](../bench/polish_bench.py) extracts the
@@ -177,7 +183,8 @@ payload is declared content, never instructions.
 ## Cleanup prompt: known limits
 
 - A spoken join whose words also form an ordinary phrase ("training period strip") is typed unchanged, or as whisper dotted it.
-- Only period, dot, comma and their Russian and Hebrew equivalents become marks; "new line" is not converted, since every newline is typed as a space.
+- Only period, dot, comma and their Russian and Hebrew equivalents become marks; "new line" is converted only with `polish.line_breaks`, and typed as a line break only by the `type` rung outside a terminal.
+- Shift+Enter is a line break in most chat boxes and editors, but a few apps act on it (a notebook cell runs), and a terminal byovox does not recognise by its window class (VS Code's integrated terminal, for one) may read it as Enter.
 - A spoken terminal "period" becomes `.` and is then removed by `inject.strip_terminal_period`.
 - A list whose second item isn't parallel to the first can stay unnumbered, and a numbered item can keep its cue word ("1. First we…").
 - With cleanup down, disabled or skipped by `polish.min_words`, punctuation names are typed as words and lists stay unformatted.
@@ -214,7 +221,8 @@ stderr under `byovox run`. INFO is one line per dictation; only DEBUG carries tr
 
 **`byovox check`** ([src/check.rs](../src/check.rs)) runs what the daemon would: config, a
 warning per plain-HTTP remote endpoint, hosted notes, update setting, `[stt.server]`, hotkey,
-backends and rungs, a 1 s microphone sample and its level, layout and resolved policy, an STT
+with `[tts]` enabled one read-aloud request of a fixed phrase per lane with a voice (`tts`,
+`tts[<code>]`; the reply is decoded, never played), backends and rungs, a 1 s microphone sample and its level, layout and resolved policy, an STT
 round trip plus one per lane (`stt[<code>]`), a polish round trip through the daemon's exact
 prompt, an inject dry run. It exits non-zero when a required stage fails; `warn` and `note`
 rows never do.
@@ -271,9 +279,9 @@ late lookup, playback and UI results. No shared-state lock is held across select
 `selection_copy::copy_selection` is the selection: it waits for the shortcut's keys to be up,
 checks that the window the shortcut was pressed in is still in front, sends one marked Copy chord
 (Ctrl+C, or Ctrl+Insert in Windows Terminal; other consoles are refused), reads the clipboard's
-text once its sequence number changes, within one second, and puts the previous clipboard text
-back before returning. In Windows Terminal an unchanged clipboard is read as it is, for programs
-that copy on select.
+text once its sequence number changes, within one second, and puts the previous clipboard text,
+image or file list back before returning (`clipboard::Saved`, shared with `PasteInject`). In
+Windows Terminal an unchanged clipboard is read as it is, for programs that copy on select.
 
 The action dispatcher stops TTS before forwarding a dictation press; Escape does not stop it. Pending forwarded
 pipeline actions remain counted until handled or drained, preventing a subsequent read action

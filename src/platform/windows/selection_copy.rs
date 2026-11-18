@@ -1,4 +1,4 @@
-//! Read-aloud's selection: the app's own Copy, then the previous clipboard text back.
+//! Read-aloud's selection: the app's own Copy, then the previous clipboard back.
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::HWND;
@@ -11,12 +11,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
 };
 
+use super::clipboard::Saved;
 use super::hotkey::INJECT_MARKER;
 
 /// How long the app gets to put its Copy on the clipboard; no change means nothing was selected.
 const COPY_WAIT: Duration = Duration::from_millis(1000);
 
-/// Copies the selection in `window` and puts the clipboard's previous text back.
+/// Copies the selection in `window` and puts the clipboard's previous text, image or file list
+/// back.
 pub(crate) fn copy_selection(
     window: isize,
     trigger: u32,
@@ -32,7 +34,7 @@ pub(crate) fn copy_selection(
         .ok_or("Read aloud: this terminal is not supported; Windows Terminal is")?;
     let mut clipboard =
         arboard::Clipboard::new().map_err(|_| "Read aloud: clipboard unavailable; try again")?;
-    let previous = clipboard.get_text().ok();
+    let previous = Saved::of(&mut clipboard);
     // SAFETY: plain getter.
     let before = unsafe { GetClipboardSequenceNumber() };
     send_copy(chord)?;
@@ -43,15 +45,13 @@ pub(crate) fn copy_selection(
             return Err("Read aloud: cancelled".into());
         }
         if Instant::now() >= deadline {
-            return unchanged_clipboard(chord, previous);
+            return unchanged_clipboard(chord, previous.and_then(Saved::into_text));
         }
         std::thread::sleep(Duration::from_millis(10));
     }
     let copied = clipboard.get_text();
-    if let Some(previous) = previous
-        && let Err(e) = clipboard.set_text(previous)
-    {
-        tracing::warn!(error = %e, "could not restore the previous clipboard text");
+    if let Some(previous) = previous {
+        previous.restore(&mut clipboard);
     }
     match copied {
         Ok(text) if !text.trim().is_empty() => Ok(text),
@@ -132,6 +132,18 @@ fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
     }
 }
 
+/// Whether the foreground window, or the control focused in it, is a terminal: there
+/// Shift+Enter can submit a line as Enter does.
+pub(super) fn terminal_in_front() -> bool {
+    // SAFETY: getter; the handle is used for class lookups only.
+    let window = unsafe { GetForegroundWindow() };
+    is_terminal(&class(window), &class(focused(window)))
+}
+
+fn is_terminal(root: &str, focused: &str) -> bool {
+    copy_chord(root, focused) != Some(CopyChord::Desktop)
+}
+
 fn copy_inputs(chord: CopyChord) -> Vec<INPUT> {
     let key = match chord {
         CopyChord::Desktop => 0x43,
@@ -200,6 +212,24 @@ mod tests {
             copy_chord("Notepad++", "Scintilla"),
             Some(CopyChord::Desktop)
         );
+    }
+
+    #[test]
+    fn every_recognised_terminal_gets_no_line_break_and_a_desktop_app_does() {
+        for name in [
+            "CASCADIA_HOSTING_WINDOW_CLASS",
+            "ConsoleWindowClass",
+            "mintty",
+            "VirtualConsoleClass",
+        ] {
+            assert!(is_terminal(name, "child"), "{name}");
+            assert!(is_terminal("root", name), "{name}");
+        }
+        assert!(!is_terminal("Notepad", "RichEditD2DPT"));
+        assert!(!is_terminal(
+            "Chrome_WidgetWin_1",
+            "Chrome_RenderWidgetHostHWND"
+        ));
     }
 
     #[test]

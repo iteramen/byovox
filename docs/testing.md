@@ -51,6 +51,7 @@ map out, so every row below would log `auto`.
 - [ ] dictate a plain sentence: the text lands with no final period; dictate a question: the `?` stays; with `inject.strip_terminal_period = false` the period is typed
 - [ ] dictate "rename it to tokenizer period strip" and read the raw transcript in the log first: **when whisper wrote the words undotted**, `tokenizer.strip` is typed, not the three words; dictate "the Jurassic period ended" → `period` stays a word. "training period strip" is the known limit, not a regression: "training period" is an English noun phrase, so the sentence gives no more evidence than the Jurassic one does and the words stay — as they also do when whisper dotted them itself (`training.period.strip`)
 - [ ] with `polish.capitalize_first_word = false`: dictate "we should ship it today" → it lands lowercase; dictate "NASA confirmed it" and "I think we ship" → the capital stays, and stays when the model lowers it. With a `polish.prompt_file` set, the flag changes nothing — that file owns its own rule 1
+- [ ] with `polish.line_breaks = true`: dictate "see you at ten new line bring the slides" into Notepad and into WhatsApp → two lines, the WhatsApp message *unsent*; the same into Windows Terminal, and with `inject.mode = "paste"`, lands on one line; with the setting off, one line everywhere
 - [ ] with `[stt.by_language.he]` configured: `byovox check` shows an `ok stt[he]` row; dictate "אני עוד רבע שעה אצלו" on any layout → `רבע שעה` (the default lane types `רבשה`); on the Hebrew layout mapped to `he`, dictate one word ("תודה") → it still lands, and the log shows `stt lane returned nothing; retrying the default endpoint`
 - [ ] with a glossary in `stt.prompt`: dictate "שמנו את Tailscale מאחורי אותו proxy" under a Hebrew layout → `Tailscale` lands in Latin; dictate "ראיתי אריה בגן החיות" → `אריה` stays Hebrew
 
@@ -100,7 +101,7 @@ With `[tts]` enabled and a reachable TTS server:
 - [ ] WhatsApp, Notepad and a browser page: select a paragraph, Ctrl+Alt+R reads it, a second press stops it
 - [ ] press Ctrl+Alt+R, switch windows once reading starts, press Escape there: it keeps reading
 - [ ] nothing selected: `select text first`, nothing is read, the clipboard is unchanged
-- [ ] the text on the clipboard before a read is back on it afterwards
+- [ ] the text, image or copied files on the clipboard before a read are back on it afterwards
 - [ ] Windows Terminal with a selection: it reads; with none, the running program is not interrupted
 - [ ] herdr in Windows Terminal: drag-select in a pane, Ctrl+Alt+R reads that text
 - [ ] a classic console window (cmd.exe in conhost): refused with `this terminal is not supported`

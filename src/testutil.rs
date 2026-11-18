@@ -30,6 +30,17 @@ impl MockServer {
         Self::serve(vec![Reply::Raw(response.as_bytes().to_vec())])
     }
 
+    /// Answers every request 200 with this WAV body.
+    pub fn start_wav(wav: &[u8]) -> MockServer {
+        let mut reply = format!(
+            "HTTP/1.1 200 X\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            wav.len()
+        )
+        .into_bytes();
+        reply.extend_from_slice(wav);
+        Self::serve(vec![Reply::Raw(reply)])
+    }
+
     pub fn start_closing_first(status: u16, body: &str) -> MockServer {
         Self::serve(vec![
             Reply::Close,

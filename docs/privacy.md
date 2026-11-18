@@ -32,9 +32,10 @@ byovox ships with no server address: `stt.base_url` and `polish.base_url` are em
 them (`src/config.rs` — `SttConfig`, `PolishConfig`). Once you do:
 
 - **Your speech server.** The recording is sent as a WAV file to
-  `POST {stt.base_url}/audio/transcriptions`, once, or twice to that same address when no response
-  arrives at all (`src/stt.rs` — `SttClient::send`). With it go the model name, the response
-  format, your glossary (`stt.prompt`) if you set one, and either `language` (a two-letter code)
+  `POST {stt.base_url}/audio/transcriptions`, once, or again to that same address when no response
+  arrives at all (`src/stt.rs` — `SttClient::send`), when the server refuses `vad=true` on a take
+  over 60 seconds, or when it refuses `language_candidates` (`SttClient::transcribe`). With it go
+  the model name, the response format, your glossary (`stt.prompt`) if you set one, and either `language` (a two-letter code)
   or, on auto-detect, the `language_candidates` you listed, if any (`src/lang.rs` —
   `SttLanguage::form_fields`, `LanguagePolicy::resolve`). The code can come from the keyboard
   layout of the window you dictate into, mapped by `language.by_layout`
@@ -67,7 +68,11 @@ them (`src/config.rs` — `SttConfig`, `PolishConfig`). Once you do:
 - **`byovox check`.** It sends its 1-second recording to your speech server and to every lane,
   and the fixed sentence `um so this is uh a test` to the cleanup server when that is enabled, and
   prints the first 60 characters of each reply on the console (`src/check.rs` — `run`,
-  `stt_round_trip`, `polish_round_trip`). The tray's *Run check* runs the same command.
+  `stt_round_trip`, `polish_round_trip`). With read aloud enabled, it sends one fixed phrase to
+  the English TTS lane and to each Hebrew or Russian lane with a voice, with the token a read
+  would send, and prints the request time and the audio's length, or the error a read would
+  show; the audio is not played
+  (`src/check.rs` — `TTS_PHRASES`, `tts_rows`). The tray's *Run check* runs the same command.
 - **`byovox setup`.** It tests the servers you name with one second of digital silence and the
   same fixed sentence (`check::probe_stt`, `probe_polish`), and ends by running `byovox check`.
   It asks a local Ollama at `http://127.0.0.1:11434/api/tags` which models it has
@@ -181,9 +186,11 @@ In the default `auto` mode byovox types the text as keystrokes, which leaves the
 and uses the clipboard only if typing fails (`src/platform/mod.rs` — `detect`;
 `src/platform/windows/inject.rs`):
 
-- **`paste`** saves the clipboard's text, puts the transcript there, presses Ctrl+V and puts the
-  saved text back 150 ms later (`PasteInject`). If the clipboard held something other than text
-  (an image, files) or nothing, it is not saved: it is replaced, and the transcript stays.
+- **`paste`** saves the clipboard's text, else its image, else its file list, puts the
+  transcript there, presses Ctrl+V and puts what it saved back 150 ms later (`PasteInject`,
+  `src/platform/windows/clipboard.rs`). An image comes back as a plain bitmap. If the clipboard
+  held only other formats (rich text, an app's own formats) or nothing, it is not saved: it is
+  replaced, and the transcript stays.
 - **`clipboard-only`** puts the transcript on the clipboard and leaves it there
   (`ClipboardOnlyInject`).
 
@@ -235,11 +242,11 @@ also welcome as [GitHub issues](https://github.com/iteramen/byovox/issues).
 With `[tts].enabled = true`, Ctrl+Alt+R reads the selected text aloud; dictation keeps its own
 shortcut. When you release the shortcut, byovox sends the app its Copy keys (Ctrl+C, or
 Ctrl+Insert in Windows Terminal), takes the text from the clipboard and puts your previous
-clipboard text back. While it is there, Windows clipboard history, cloud clipboard and clipboard
-managers can keep it; putting your text back does not undo that. Only text is put back: if the
-clipboard held an image or files, it holds the copied text afterwards. Nothing selected means
-nothing is read, except in Windows Terminal, where the clipboard's current text is read: a
-program that copies on select, such as herdr, has already put its selection there.
+clipboard text, image or file list back. While the copied text is there, Windows clipboard
+history, cloud clipboard and clipboard managers can keep it; putting your clipboard back does not
+undo that. If the clipboard held only other formats, it holds the copied text afterwards. Nothing
+selected means nothing is read, except in Windows Terminal, where the clipboard's current text is
+read: a program that copies on select, such as herdr, has already put its selection there.
 
 The text goes to your configured TTS endpoint, in chunks, with model, voice and speed
 (`read_aloud::synthesize`). The TTS server can retain it under its own policy. HTTPS verifies

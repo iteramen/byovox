@@ -7,4 +7,5 @@ pub mod hotkey;
 pub mod inject;
 pub mod layout;
 
+pub(crate) mod clipboard;
 pub(crate) mod selection_copy;

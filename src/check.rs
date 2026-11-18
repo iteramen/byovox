@@ -14,6 +14,7 @@ use crate::hotkey::{HotkeyMode, parse_chord, validate_key_name};
 use crate::lang::{Lang, LanguagePolicy, SttLanguage};
 use crate::pipeline::no_speech;
 use crate::polish::{self, PolishClient, Polisher};
+use crate::read_aloud::{TtsConfig, synthesize};
 use crate::stt::{SttClient, Transcriber};
 
 const SAMPLE: Duration = Duration::from_secs(1);
@@ -173,10 +174,52 @@ fn lane_row(
     }
 }
 
+const TTS_PHRASES: [(&str, &str); 3] = [
+    ("en", "This is a byovox check."),
+    ("he", "זוהי בדיקה."),
+    ("ru", "Это проверка."),
+];
+
+fn tts_lane_has_voice(tts: &TtsConfig, code: &str) -> bool {
+    tts.by_language
+        .get(code)
+        .is_some_and(|l| !l.voice.is_empty())
+}
+
+fn tts_row(tts: &TtsConfig, code: &str, phrase: &str) -> Result<String, String> {
+    let endpoint = tts.endpoint(code)?;
+    let t = Instant::now();
+    let audio = synthesize(tts, &endpoint, phrase, || true)?;
+    let frames = audio.samples.len() as f32 / f32::from(audio.channels);
+    Ok(format!(
+        "{:.2}s  {:.1}s of audio",
+        t.elapsed().as_secs_f32(),
+        frames / audio.rate as f32
+    ))
+}
+
+/// English always, he/ru only with a voice: the same lanes the `read-aloud` row calls configured.
+fn tts_rows(tts: &TtsConfig) -> bool {
+    let mut all_ok = true;
+    for (code, phrase) in TTS_PHRASES {
+        let name = match code {
+            "en" => "tts".to_string(),
+            _ if tts_lane_has_voice(tts, code) => format!("tts[{code}]"),
+            _ => continue,
+        };
+        all_ok &= report(&name, tts_row(tts, code, phrase)).is_ok();
+    }
+    all_ok
+}
+
 /// Reading `polish.prompt_file` here makes a path typo fail the check, not the first dictation.
-fn prompt_text(prompt_file: &str, capitalize_first_word: bool) -> Result<String, String> {
+fn prompt_text(
+    prompt_file: &str,
+    capitalize_first_word: bool,
+    line_breaks: bool,
+) -> Result<String, String> {
     if prompt_file.is_empty() {
-        return Ok(crate::polish::built_in(capitalize_first_word));
+        return Ok(crate::polish::built_in(capitalize_first_word, line_breaks));
     }
     let path = expand_home(prompt_file);
     std::fs::read_to_string(&path)
@@ -308,34 +351,27 @@ pub fn run(cfg: &Config, config_path: &Path) -> bool {
             cfg.tts
                 .validate_hotkeys(&cfg.hotkey.key, &cfg.hotkey.cancel_key)
         }) {
-            Ok(()) => line(
-                "read-aloud",
-                None,
-                &format!(
-                    "{}; configured (selection/playback not tested); he={}, ru={}",
-                    cfg.tts.effective_hotkey(),
-                    if cfg
-                        .tts
-                        .by_language
-                        .get("he")
-                        .is_some_and(|l| !l.voice.is_empty())
-                    {
-                        "configured"
-                    } else {
-                        "unconfigured"
-                    },
-                    if cfg
-                        .tts
-                        .by_language
-                        .get("ru")
-                        .is_some_and(|l| !l.voice.is_empty())
-                    {
-                        "configured"
-                    } else {
-                        "unconfigured"
-                    }
-                ),
-            ),
+            Ok(()) => {
+                line(
+                    "read-aloud",
+                    None,
+                    &format!(
+                        "{}; configured (selection/playback not tested); he={}, ru={}",
+                        cfg.tts.effective_hotkey(),
+                        if tts_lane_has_voice(&cfg.tts, "he") {
+                            "configured"
+                        } else {
+                            "unconfigured"
+                        },
+                        if tts_lane_has_voice(&cfg.tts, "ru") {
+                            "configured"
+                        } else {
+                            "unconfigured"
+                        }
+                    ),
+                );
+                all_ok &= tts_rows(&cfg.tts);
+            }
             Err(e) => {
                 line("read-aloud", Some(false), &e);
                 all_ok = false;
@@ -575,7 +611,7 @@ fn no_speech_row(mean: Option<f32>, max: Option<f32>, threshold: f64, warn: f64)
 fn polish_round_trip(cfg: &PolishConfig, stt: &SttConfig) -> Result<String, String> {
     let key = stage_token(&cfg.api_key_env, &cfg.api_key_file)?;
     let prompt = polish::prompt_for(
-        &prompt_text(&cfg.prompt_file, cfg.capitalize_first_word)?,
+        &prompt_text(&cfg.prompt_file, cfg.capitalize_first_word, cfg.line_breaks)?,
         stt,
     );
     let client = PolishClient::new(
@@ -611,12 +647,14 @@ mod tests {
 
     use super::{
         Audio, HotkeyConfig, LANE_401_HINT, PREFIX_CHARS, SAMPLE_RATE, SttConfig, SttLanguage,
-        cleartext_endpoints, enough_audio, hosted_endpoints, hotkey_error, hotkey_row,
-        is_hands_free, lane_error, lane_row, layout_row, mic_row_detail, no_speech_row, prefix,
-        prompt_text, server_row, silence, stage_token, strip_body, update_row,
+        TTS_PHRASES, TtsConfig, cleartext_endpoints, enough_audio, hosted_endpoints, hotkey_error,
+        hotkey_row, is_hands_free, lane_error, lane_row, layout_row, mic_row_detail, no_speech_row,
+        prefix, prompt_text, server_row, silence, stage_token, strip_body, tts_row, tts_rows,
+        update_row,
     };
     use crate::config::{LanguageConfig, SttLane};
     use crate::lang::{Lang, LanguagePolicy};
+    use crate::read_aloud::TtsLane;
     use crate::testutil::{MockServer, auth_header};
 
     #[test]
@@ -976,25 +1014,106 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    fn tts_on(base_url: &str) -> TtsConfig {
+        TtsConfig {
+            enabled: true,
+            base_url: base_url.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_tts_lane_that_answers_with_a_wav_gets_an_ok_row() {
+        let srv = MockServer::start_wav(&silence().to_wav());
+        let tts = tts_on(srv.url());
+        assert_eq!(
+            tts_row(&tts, "en", "This is a byovox check.")
+                .unwrap()
+                .split_once("  ")
+                .unwrap()
+                .1,
+            "1.0s of audio"
+        );
+        assert!(tts_rows(&tts));
+        let sent = srv.requests();
+        assert!(sent[0].starts_with("POST /audio/speech"), "{}", sent[0]);
+        assert!(sent[0].contains("This is a byovox check."), "{}", sent[0]);
+    }
+
+    #[test]
+    fn a_tts_lane_that_answers_500_fails_its_row_and_the_check() {
+        let srv = MockServer::start(500, "PRIVATE-FIXTURE");
+        let tts = tts_on(srv.url());
+        assert_eq!(
+            tts_row(&tts, "en", "x").unwrap_err(),
+            "Read aloud: TTS returned HTTP 500"
+        );
+        assert!(!tts_rows(&tts));
+    }
+
+    #[test]
+    fn only_a_tts_lane_with_a_voice_gets_a_request() {
+        let en = MockServer::start_wav(&silence().to_wav());
+        let he = MockServer::start_wav(&silence().to_wav());
+        let ru = MockServer::start_wav(&silence().to_wav());
+        let mut tts = tts_on(en.url());
+        tts.by_language.insert(
+            "he".into(),
+            TtsLane {
+                base_url: he.url().into(),
+                ..Default::default()
+            },
+        );
+        tts.by_language.insert(
+            "ru".into(),
+            TtsLane {
+                base_url: ru.url().into(),
+                voice: "ru-voice".into(),
+                ..Default::default()
+            },
+        );
+        assert!(tts_rows(&tts));
+        assert_eq!(en.requests().len(), 1);
+        assert!(he.requests().is_empty(), "a lane with no voice is not sent");
+        let sent = ru.requests();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].contains("ru-voice"), "{}", sent[0]);
+    }
+
+    #[test]
+    fn each_tts_phrase_is_in_its_lanes_script() {
+        for (code, phrase) in TTS_PHRASES {
+            assert_eq!(
+                crate::read_aloud::script_language(phrase).unwrap(),
+                code,
+                "{phrase}"
+            );
+        }
+    }
+
     #[test]
     fn the_configured_prompt_is_what_check_reads_and_sends() {
-        assert_eq!(prompt_text("", true).unwrap(), BUILT_IN_PROMPT);
-        let lowered = prompt_text("", false).unwrap();
+        assert_eq!(prompt_text("", true, false).unwrap(), BUILT_IN_PROMPT);
+        let lowered = prompt_text("", false, false).unwrap();
         assert_ne!(lowered, BUILT_IN_PROMPT);
         assert!(lowered.contains(crate::polish::LOWERCASE_FIRST_RULE));
+        let on = prompt_text("", true, true).unwrap();
+        assert!(on.contains(crate::polish::LINE_BREAK_RULE));
         let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
-        let text = prompt_text(manifest, true).expect("a readable file");
-        assert_eq!(
-            prompt_text(manifest, false).unwrap(),
-            text,
-            "a prompt_file owns its own rule 1 and is never rewritten"
-        );
+        let text = prompt_text(manifest, true, false).expect("a readable file");
+        for (capitalize, line_breaks) in [(false, false), (true, true), (false, true)] {
+            assert_eq!(
+                prompt_text(manifest, capitalize, line_breaks).unwrap(),
+                text,
+                "a prompt_file owns its own rules and is never rewritten"
+            );
+        }
         assert!(
             text.contains("byovox"),
             "the file's own text, not the built-in"
         );
         assert_ne!(text, BUILT_IN_PROMPT);
-        let e = prompt_text("no-such-dir/no-such-prompt.txt", true).unwrap_err();
+        let e = prompt_text("no-such-dir/no-such-prompt.txt", true, false).unwrap_err();
         let (path, io) = e
             .strip_prefix("polish.prompt_file ")
             .and_then(|rest| rest.split_once(": "))
