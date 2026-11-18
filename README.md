@@ -162,6 +162,9 @@ is the healthy result, not a broken server.
 
 Everything else: `byovox --help`.
 
+After editing the config, the tray's **Restart** applies it. It checks the file first: if the
+file does not validate, the running byovox stays up and the tray shows the error.
+
 ## Don't like Right Ctrl?
 
 ```sh

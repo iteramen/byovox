@@ -98,6 +98,7 @@ pub enum MenuAction {
     OpenLogs,
     RunCheck,
     OpenRelease,
+    Restart,
     Quit,
 }
 
@@ -319,6 +320,7 @@ struct MenuItems {
     open_logs: MenuItem,
     run_check: MenuItem,
     open_release: MenuItem,
+    restart: MenuItem,
     quit: MenuItem,
     menu: Menu,
 }
@@ -340,6 +342,7 @@ impl App {
             open_logs: MenuItem::new("Open logs", true, None),
             run_check: MenuItem::new("Run check", true, None),
             open_release: MenuItem::new("Open the release page", true, None),
+            restart: MenuItem::new("Restart", true, None),
             quit: MenuItem::new("Quit", true, None),
             menu: menu.clone(),
         };
@@ -357,6 +360,7 @@ impl App {
             &items.open_logs,
             &items.run_check,
             &PredefinedMenuItem::separator(),
+            &items.restart,
             &items.quit,
         ])?;
         let tray = TrayIconBuilder::new()
@@ -377,6 +381,7 @@ impl App {
             (items.open_logs.id().clone(), MenuAction::OpenLogs),
             (items.run_check.id().clone(), MenuAction::RunCheck),
             (items.open_release.id().clone(), MenuAction::OpenRelease),
+            (items.restart.id().clone(), MenuAction::Restart),
             (items.quit.id().clone(), MenuAction::Quit),
         ];
         // Runs in the tray's window procedure: a panic would unwind through foreign frames, so a poisoned lock drops the click.
@@ -580,6 +585,28 @@ impl App {
     fn menu(&mut self, action: MenuAction, event_loop: &ActiveEventLoop) {
         match action {
             MenuAction::Quit => event_loop.exit(),
+            MenuAction::Restart => match restart(&self.config_path, spawn_replacement) {
+                Ok(()) => {
+                    tracing::info!("restarting from the tray");
+                    event_loop.exit();
+                }
+                Err(e) => {
+                    let message = format!("{e:#}");
+                    tracing::warn!("restart from the tray: {message}");
+                    let idle = {
+                        let mut s = shared_of(&self.shared);
+                        s.last_error = Some(message.clone());
+                        s.state == "idle"
+                    };
+                    if idle {
+                        self.apply(IndicatorState::Error, true);
+                    }
+                    #[cfg(windows)]
+                    if let Some(tray) = &self.tray {
+                        let _ = show_balloon(tray, "byovox did not restart", &message);
+                    }
+                }
+            },
             MenuAction::ToggleEnabled => {
                 self.enabled = !self.enabled;
                 // Cancel before the pipeline can see the flag, so the microphone closes now.
@@ -819,6 +846,27 @@ pub fn run(
     };
     event_loop.run_app(&mut app).context("event loop")?;
     Ok(())
+}
+
+/// Validated here, before this daemon gives anything up, so a config that fails leaves it running.
+fn restart(config: &Path, spawn: impl FnOnce(&Path) -> std::io::Result<()>) -> Result<()> {
+    crate::daemon::preflight(Some(config))?;
+    spawn(config).context("starting the new daemon")
+}
+
+/// `byovox-daemon` even under `byovox run`, whose tray runs inside the CLI.
+fn spawn_replacement(config: &Path) -> std::io::Result<()> {
+    use std::process::{Command, Stdio};
+    let exe = std::env::current_exe()?;
+    Command::new(crate::daemon::daemon_exe(&exe))
+        .arg("--config")
+        .arg(config)
+        .arg("--wait-for-previous")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(drop)
 }
 
 /// Edits only `capture.device`, in the file as it is now: hand edits made since startup survive.
@@ -1249,6 +1297,48 @@ mod tests {
         }
     }
     use super::*;
+
+    #[test]
+    fn restart_starts_a_new_daemon_only_when_the_config_validates() {
+        let dir = std::env::temp_dir().join(format!("byovox-test-{}-restart", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let write = |volume: &str| {
+            std::fs::write(
+                &path,
+                format!("[stt]\nbase_url = \"http://s/v1\"\n[polish]\nenabled = false\n[indicator]\ncue_volume = {volume}\n"),
+            )
+            .unwrap();
+        };
+
+        write("0.5");
+        let mut spawned = None;
+        restart(&path, |p| {
+            spawned = Some(p.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(spawned.as_deref(), Some(path.as_path()));
+
+        write("7");
+        let mut spawned = false;
+        let e = restart(&path, |_| {
+            spawned = true;
+            Ok(())
+        })
+        .expect_err("an invalid config must not restart");
+        assert!(!spawned, "the running daemon must be kept");
+        assert!(format!("{e:#}").contains("indicator.cue_volume"), "{e:#}");
+
+        write("0.5");
+        let e = restart(&path, |_| Err(std::io::Error::other("no exe"))).unwrap_err();
+        assert!(
+            format!("{e:#}").contains("starting the new daemon"),
+            "{e:#}"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn a_tray_pick_rewrites_only_capture_device_and_keeps_the_rest() {

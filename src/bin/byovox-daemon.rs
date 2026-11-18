@@ -15,6 +15,9 @@ struct Cli {
     /// Config file (default: the platform config dir)
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Start once the running daemon has exited (the tray's Restart)
+    #[arg(long, hide = true)]
+    wait_for_previous: bool,
 }
 
 /// Inherited NUL handles give console children (the tray's `Run check`) a console wired to NUL; NULL handles give a real one.
@@ -38,6 +41,7 @@ fn main() {
     let result = byovox::daemon::run(byovox::daemon::Options {
         config_path: cli.config,
         log_to_stderr: false,
+        wait_for_previous: cli.wait_for_previous,
     });
     if let Err(e) = result {
         // stderr is NULL by now; the exit code is what `try_wait` sees.
