@@ -11,7 +11,7 @@ and one TOML file. Only Windows has backends: the crate builds and tests on Linu
 
 - **Any OpenAI-compatible server.** `/v1/audio/transcriptions` for speech,
   `/v1/chat/completions` for cleanup. `language_candidates` is an optional whisper.cpp server
-  extension; servers without it ignore the field.
+  extension; a server that refuses it with a 4xx naming the field is not sent it again that run.
 - **Detect, then route.** Detection among candidate languages, a confident detection re-sent
   to that language's own endpoint, the keyboard layout as the hint when detection is unsure.
 - **Never lossy.** Once a transcript exists, every later failure still ends in an insert
@@ -85,7 +85,7 @@ elevated windows, is in [platform-windows.md](platform-windows.md).
 | Hotkey | `WH_KEYBOARD_LL` hook: any key, a bare modifier, or a held chord (releasing any member ends it). A chord's trigger is swallowed; a bare key and a chord's modifiers still reach the window. |
 | Capture | `cpal`/WASAPI, open only while recording; `capture.device` pins an input. The start click and a quiet sub-second tail past the last 30 s multiple are cut ([src/audio.rs](../src/audio.rs)). |
 | Layout | foreground window's layout LANGID → ISO 639-1. |
-| Inject | `type` (`SendInput` + `KEYEVENTF_UNICODE`), `paste` (clipboard + Ctrl+V, previous clipboard text restored), `clipboard-only`. |
+| Inject | `type` (`SendInput` + `KEYEVENTF_UNICODE`), `paste` (clipboard + Ctrl+V, previous clipboard text, image or file list restored), `clipboard-only`. |
 | Target | top-level window of the UI Automation focused element at press, brought back before typing. Closed, hidden or cloaked by then: nothing is typed. |
 | Indicator | tray (`tray-icon`), pill (`winit` + `softbuffer`), cues (`rodio`, synthesised). |
 
@@ -269,9 +269,9 @@ late lookup, playback and UI results. No shared-state lock is held across select
 `selection_copy::copy_selection` is the selection: it waits for the shortcut's keys to be up,
 checks that the window the shortcut was pressed in is still in front, sends one marked Copy chord
 (Ctrl+C, or Ctrl+Insert in Windows Terminal; other consoles are refused), reads the clipboard's
-text once its sequence number changes, within one second, and puts the previous clipboard text
-back before returning. In Windows Terminal an unchanged clipboard is read as it is, for programs
-that copy on select.
+text once its sequence number changes, within one second, and puts the previous clipboard text,
+image or file list back before returning (`clipboard::Saved`, shared with `PasteInject`). In
+Windows Terminal an unchanged clipboard is read as it is, for programs that copy on select.
 
 The action dispatcher stops TTS before forwarding a dictation press; Escape does not stop it. Pending forwarded
 pipeline actions remain counted until handled or drained, preventing a subsequent read action

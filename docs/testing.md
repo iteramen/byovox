@@ -99,7 +99,7 @@ With `[tts]` enabled and a reachable TTS server:
 - [ ] WhatsApp, Notepad and a browser page: select a paragraph, Ctrl+Alt+R reads it, a second press stops it
 - [ ] press Ctrl+Alt+R, switch windows once reading starts, press Escape there: it keeps reading
 - [ ] nothing selected: `select text first`, nothing is read, the clipboard is unchanged
-- [ ] the text on the clipboard before a read is back on it afterwards
+- [ ] the text, image or copied files on the clipboard before a read are back on it afterwards
 - [ ] Windows Terminal with a selection: it reads; with none, the running program is not interrupted
 - [ ] herdr in Windows Terminal: drag-select in a pane, Ctrl+Alt+R reads that text
 - [ ] a classic console window (cmd.exe in conhost): refused with `this terminal is not supported`

@@ -165,10 +165,13 @@ impl TtsConfig {
                 "Read aloud: configure the {code} TTS voice and endpoint first"
             ));
         }
-        let base = lane
-            .map(|l| l.base_url.trim())
-            .filter(|v| !v.is_empty())
-            .unwrap_or(self.base_url.trim());
+        let lane_base = lane.map(|l| l.base_url.trim()).filter(|v| !v.is_empty());
+        let base = lane_base.unwrap_or(self.base_url.trim());
+        let key = match lane_base {
+            Some(_) => format!("tts.by_language.{code}.base_url"),
+            None => "tts.base_url".into(),
+        };
+        crate::config::refuse_unspecified_host(&key, base)?;
         let uri = base
             .parse::<ureq::http::Uri>()
             .map_err(|_| "tts.base_url: invalid HTTP(S) base URL")?;
