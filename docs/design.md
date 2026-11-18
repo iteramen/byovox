@@ -228,6 +228,7 @@ rows never do.
 **Tray and indicator** ([src/ui.rs](../src/ui.rs)). Menu: status line, Enable/Disable, Toggle
 mode, Audio cues, Microphone (System default and each input, listed afresh each time the
 pointer reaches the icon; a pick writes `capture.device`), Run on startup, Copy last transcript, Open config, Open logs, Run check,
+Restart (validates the config before the old daemon exits; the new one waits for it to go),
 Quit, and a release-page item once a newer release is found. Icons: idle, recording, working,
 error (held 3 s), disabled. The pill is an always-on-top window by the cursor while recording,
 working or showing a failure. The start, done, warning and error cues are synthesised tones

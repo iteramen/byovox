@@ -13,6 +13,8 @@ Added
 - `polish.line_breaks` (default off): say "new line" or "new paragraph" and the `type` rung
   breaks the line with Shift+Enter. Pasted text and Windows Terminal, console, mintty and ConEmu
   windows still get a space.
+- A Restart item in the tray menu applies a config edit without quitting and starting byovox
+  by hand. A config that does not validate is reported, and the running byovox keeps going.
 
 Changed
 - A dictation of room tone with a few taps or clicks is discarded as silent before any request,

@@ -18,9 +18,15 @@ use crate::{
 /// write the `quit` reply its handler already returned.
 const QUIT_GRACE: Duration = Duration::from_millis(200);
 
+/// How long a restarted daemon waits for the one it replaces to exit.
+const PREVIOUS_EXIT_WAIT: Duration = Duration::from_secs(10);
+
 pub struct Options {
     pub config_path: Option<PathBuf>,
     pub log_to_stderr: bool,
+    /// Wait for the running daemon to exit first: it holds the IPC name, the hook and the
+    /// microphone until then.
+    pub wait_for_previous: bool,
 }
 
 pub fn daemon_exe(exe: &Path) -> PathBuf {
@@ -57,6 +63,11 @@ fn validate(cfg: &Config) -> Result<()> {
 /// Owns the appender guard so fatals reach the log file (an autostarted daemon's stderr goes
 /// nowhere); `process::exit` runs no destructors, so the guard is dropped by hand.
 pub fn run(opts: Options) -> Result<()> {
+    if opts.wait_for_previous {
+        wait_until(PREVIOUS_EXIT_WAIT, || {
+            !ipc::daemon_running(&ipc::socket_name())
+        });
+    }
     let path = opts.config_path.unwrap_or_else(config::default_path);
     let cfg = config::load(&path)?;
     let guard = init_logging(&cfg.logging.level, opts.log_to_stderr)?;
@@ -78,6 +89,14 @@ pub fn run(opts: Options) -> Result<()> {
     std::thread::sleep(QUIT_GRACE);
     drop(guard);
     std::process::exit(0); // the hook thread blocks in GetMessageW; process exit ends it
+}
+
+/// Returns at the deadline even if `done` never holds; `start` then refuses as already running.
+fn wait_until(timeout: Duration, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + timeout;
+    while !done() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn lane_client(
@@ -604,6 +623,22 @@ mod tests {
         }
         let err = parse_directives("RUST_LOG", "warn=chatty").expect_err("not a directive list");
         assert!(err.to_string().contains("RUST_LOG"), "{err}");
+    }
+
+    #[test]
+    fn wait_until_returns_once_done_and_gives_up_at_the_deadline() {
+        let mut calls = 0;
+        wait_until(Duration::from_secs(10), || {
+            calls += 1;
+            calls == 3
+        });
+        assert_eq!(calls, 3);
+
+        let started = std::time::Instant::now();
+        wait_until(Duration::from_millis(100), || false);
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_millis(100), "{waited:?}");
+        assert!(waited < Duration::from_secs(5), "{waited:?}");
     }
 
     #[test]
