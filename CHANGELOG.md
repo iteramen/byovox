@@ -14,6 +14,8 @@ Added
   release's `SHA256SUMS`, swaps in the new `byovox.exe` and `byovox-daemon.exe`, starts the
   daemon and prints the old and new version. The config is kept, a failed swap puts the old
   pair back, and the daily check still only announces a release.
+- A Restart item in the tray menu applies a config edit without quitting and starting byovox
+  by hand. A config that does not validate is reported, and the running byovox keeps going.
 
 Changed
 - A dictation of room tone with a few taps or clicks is discarded as silent before any request,
