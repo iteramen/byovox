@@ -39,7 +39,7 @@ pub const OUTPUT_RULE: &str = r#"8. Output only the cleaned text: no quotes arou
 
 /// Appended to rule 8 when `polish.line_breaks` is on. Rules 1-9 keep their numbers, so the
 /// glossary rule stays 10.
-pub const LINE_BREAK_RULE: &str = r#" A spoken "new line" is a line break in the output and a spoken "new paragraph" is an empty line, and the words themselves are dropped: "see you then new line Dan" comes back as "See you then." with "Dan" on the line below. The same holds for "новая строка", "с новой строки", "новый абзац", "שורה חדשה" and "פסקה חדשה". Never break a line the speaker did not dictate. When the sentence is *about* a new line or paragraph, the words stay words: "add a new line at the end of the file", "the new paragraph is too long"."#;
+pub const LINE_BREAK_RULE: &str = r#" A spoken "new line" is a line break in the output and a spoken "new paragraph" is an empty line, and the words themselves are dropped: "see you then new line bring the slides" comes back as "See you then." with "Bring the slides" on the line below. A break never replaces punctuation, in any language: the sentence before it still ends with its period, question mark or exclamation mark, written before the break, and the line after it starts with a capital letter. The same holds for "новая строка", "с новой строки", "новый абзац", "שורה חדשה" and "פסקה חדשה". Never break a line the speaker did not dictate. When the sentence is *about* a new line or paragraph, the words stay words: "add a new line at the end of the file", "the new paragraph is too long"."#;
 
 /// The base prompt for a run that uses the built-in one: rule 1 is swapped when the first word
 /// is not to be capitalised, and rule 8 extended when line breaks are on. A
