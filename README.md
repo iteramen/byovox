@@ -72,6 +72,11 @@ would carry a capital anywhere, like a name, an acronym or "I", and a first-word
 lowers anyway is typed as "I" — and
 `inject.strip_terminal_period = false` keeps the final period byovox drops by default.
 
+To dictate several lines in one go, set `polish.line_breaks = true` and say "new line" or "new
+paragraph". The `type` rung presses Shift+Enter for each break, so a chat box that sends on
+Enter stays one unsent message. Pasted text and the common terminals still get a space, and so
+does every line break while the setting is off ([details](docs/platform-windows.md)).
+
 ### 3. Install byovox
 
 Download the Windows zip from [Releases](https://github.com/iteramen/byovox/releases) and unzip

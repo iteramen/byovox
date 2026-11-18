@@ -9,6 +9,11 @@ went public; their notes are kept below.
 
 ## Unreleased
 
+Added
+- `polish.line_breaks` (default off): say "new line" or "new paragraph" and the `type` rung
+  breaks the line with Shift+Enter. Pasted text and Windows Terminal, console, mintty and ConEmu
+  windows still get a space.
+
 Changed
 - A dictation of room tone with a few taps or clicks is discarded as silent before any request,
   instead of being typed as whatever whisper made of it (`*crickets*`). The test is now the

@@ -132,6 +132,14 @@ fn copy_chord(root: &str, focused: &str) -> Option<CopyChord> {
     }
 }
 
+/// Whether the foreground window, or the control focused in it, is a terminal: there
+/// Shift+Enter can submit a line as Enter does.
+pub(super) fn terminal_in_front() -> bool {
+    // SAFETY: getter; the handle is used for class lookups only.
+    let window = unsafe { GetForegroundWindow() };
+    copy_chord(&class(window), &class(focused(window))) != Some(CopyChord::Desktop)
+}
+
 fn copy_inputs(chord: CopyChord) -> Vec<INPUT> {
     let key = match chord {
         CopyChord::Desktop => 0x43,

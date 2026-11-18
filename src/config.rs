@@ -147,6 +147,9 @@ pub struct PolishConfig {
     pub prompt_file: String,
     /// `false` swaps rule 1 of the built-in prompt for one that lower-cases; a `prompt_file` is never rewritten.
     pub capitalize_first_word: bool,
+    /// `true` adds a spoken-line-break rule to the built-in prompt, and the `type` rung presses
+    /// Shift+Enter for each line break; every other rung, and a terminal, still gets a space.
+    pub line_breaks: bool,
     pub timeout_s: u64,
     pub connect_timeout_s: u64,
     pub hosted: bool,
@@ -163,6 +166,7 @@ impl Default for PolishConfig {
             min_words: 0,
             prompt_file: String::new(),
             capitalize_first_word: true,
+            line_breaks: false,
             timeout_s: 20,
             connect_timeout_s: 5,
             hosted: false,

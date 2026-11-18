@@ -28,10 +28,35 @@ pub enum KeyEvent {
     Vk { vk: u16, up: bool },
 }
 
+const VK_SHIFT: u16 = 0x10;
+const VK_RETURN: u16 = 0x0D;
+
+/// A `\n` is Shift+Enter, which breaks a line where Enter would send a chat message.
 pub fn key_events(text: &str) -> Vec<KeyEvent> {
     let mut out = Vec::with_capacity(text.len() * 2);
     for ch in text.chars() {
-        if ch == '\n' || ch == '\r' {
+        if ch == '\n' {
+            out.extend([
+                KeyEvent::Vk {
+                    vk: VK_SHIFT,
+                    up: false,
+                },
+                KeyEvent::Vk {
+                    vk: VK_RETURN,
+                    up: false,
+                },
+                KeyEvent::Vk {
+                    vk: VK_RETURN,
+                    up: true,
+                },
+                KeyEvent::Vk {
+                    vk: VK_SHIFT,
+                    up: true,
+                },
+            ]);
+            continue;
+        }
+        if ch == '\r' {
             continue;
         }
         let mut units = [0u16; 2];
@@ -80,19 +105,19 @@ fn to_input(ev: KeyEvent) -> INPUT {
     }
 }
 
-/// Events per `SendInput` call. Must be at least 4 — the longest character — or `chunks`
-/// could not find a boundary to end on.
+/// Events per `SendInput` call. Must be at least 4 — the longest character, and Shift+Enter —
+/// or `chunks` could not find a boundary to end on.
 const CHUNK: usize = 64;
 
 fn is_boundary(ev: KeyEvent) -> bool {
     match ev {
         KeyEvent::Unicode { unit, up } => !up && !(0xDC00..=0xDFFF).contains(&unit),
-        KeyEvent::Vk { up, .. } => !up,
+        KeyEvent::Vk { vk, up } => !up && vk != VK_RETURN,
     }
 }
 
 /// Split the plan into `SendInput` batches. Consecutive calls are not atomic, so a batch never
-/// ends inside a character (a key-down/up pair or a surrogate pair).
+/// ends inside a character (a key-down/up pair, a surrogate pair or Shift+Enter).
 fn chunks(events: &[KeyEvent]) -> Vec<&[KeyEvent]> {
     let mut out = Vec::new();
     let mut start = 0;
@@ -128,6 +153,9 @@ impl Inject for TypeInject {
         "type"
     }
     fn inject(&mut self, text: &str) -> Result<(), String> {
+        if text.contains('\n') && super::selection_copy::terminal_in_front() {
+            return send(&key_events(&text.replace('\n', " ")));
+        }
         send(&key_events(text))
     }
 }
@@ -409,7 +437,7 @@ mod tests {
 
     #[test]
     fn plans_unicode_units_and_never_a_virtual_key() {
-        let ev = key_events("a\n\rb");
+        let ev = key_events("a\rb");
         assert_eq!(
             ev,
             vec![
@@ -432,6 +460,32 @@ mod tests {
             ]
         );
         assert!(!ev.iter().any(|e| matches!(e, KeyEvent::Vk { .. })));
+    }
+
+    #[test]
+    fn a_line_break_is_shift_enter_and_never_a_bare_enter() {
+        let key = |vk, up| KeyEvent::Vk { vk, up };
+        let ev = key_events("a\nb");
+        assert_eq!(
+            ev[2..6],
+            [
+                key(VK_SHIFT, false),
+                key(VK_RETURN, false),
+                key(VK_RETURN, true),
+                key(VK_SHIFT, true),
+            ]
+        );
+        assert_eq!(ev.len(), 8);
+    }
+
+    #[test]
+    fn a_batch_never_splits_shift_enter() {
+        // 31 characters fill 62 events; the line break's four straddle the 64-event batch edge.
+        let ev = key_events(&format!("{}\nb", "a".repeat(31)));
+        let batches = chunks(&ev);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].len(), 62, "the batch ends before Shift");
+        assert_eq!(batches[1].len(), 6);
     }
 
     #[test]

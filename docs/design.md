@@ -120,7 +120,10 @@ microphone, an unknown key name or a bad `inject.mode` refuses to start.
    the raw transcript is typed, with the error cue and a WARN.
 7. **Sanitise, then inject.** [`pipeline::sanitize`](../src/pipeline.rs) turns `\n`, U+2028 and
    U+2029 into spaces and drops all other control and format (`Cf`) characters except LRM/RLM
-   and ZWJ/ZWNJ, logging only the count. Then trim, strip one terminal `.` (never an ellipsis, `?`
+   and ZWJ/ZWNJ, logging only the count. With `polish.line_breaks` each `\n`-separated line is
+   sanitised on its own and the `\n` kept; only the `type` rung receives it, as Shift+Enter
+   (a space in a Windows Terminal, console, mintty or ConEmu window), and every other rung gets
+   a space. Then trim, strip one terminal `.` (never an ellipsis, `?`
    or `!`) unless `inject.strip_terminal_period = false`, append a space if
    `inject.trailing_space`, restore the target window (with nothing focused at press: go on
    only if focus is now in a text field), and run the rungs. The done cue plays only for
@@ -167,6 +170,9 @@ payload is declared content, never instructions.
 - `polish.capitalize_first_word = false` swaps rule 1 for `LOWERCASE_FIRST_RULE` and gives a
   lower-cased first-word "I" its capital back. A `polish.prompt_file` replaces the prompt
   verbatim and is never rewritten.
+- `polish.line_breaks = true` appends `LINE_BREAK_RULE` to rule 8: a spoken "new line" or "new
+  paragraph" (and their Russian and Hebrew equivalents) becomes a line break. Rules keep their
+  numbers, so the glossary rule stays 10.
 - `polish::prompt_for` appends a glossary rule carrying `stt.prompt` and every lane `prompt`,
   so transliterated technical terms come back in Latin.
 - Rule changes are measured: [bench/polish_bench.py](../bench/polish_bench.py) extracts the
@@ -176,7 +182,8 @@ payload is declared content, never instructions.
 ## Cleanup prompt: known limits
 
 - A spoken join whose words also form an ordinary phrase ("training period strip") is typed unchanged, or as whisper dotted it.
-- Only period, dot, comma and their Russian and Hebrew equivalents become marks; "new line" is not converted, since every newline is typed as a space.
+- Only period, dot, comma and their Russian and Hebrew equivalents become marks; "new line" is converted only with `polish.line_breaks`, and typed as a line break only by the `type` rung outside a terminal.
+- Shift+Enter is a line break in most chat boxes and editors, but a few apps act on it (a notebook cell runs), and a terminal byovox does not recognise by its window class (VS Code's integrated terminal, for one) may read it as Enter.
 - A spoken terminal "period" becomes `.` and is then removed by `inject.strip_terminal_period`.
 - A list whose second item isn't parallel to the first can stay unnumbered, and a numbered item can keep its cue word ("1. First we…").
 - With cleanup down, disabled or skipped by `polish.min_words`, punctuation names are typed as words and lists stay unformatted.
