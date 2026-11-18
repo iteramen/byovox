@@ -148,7 +148,7 @@ UIA calls. Unsupported-selection errors include only numeric control-role/provid
 Lookup inspects the focused control and visible foreground text-selection providers, with range inspection bounded to 128 visible TextPattern providers and a 1.5-second budget checked between providers. Each platform call has a one-second timeout; multiple calls per provider mean this is not a hard total-time bound.
 It never asks for an element name/value or document text. GetText is called only after selected
 range endpoints prove the range non-degenerate. Equal parent/child selections are deduplicated;
-different selected text is refused. Only providers advertising TextPattern are inspected; element names/values and document contents are not read. The source window is rechecked before a payload can reach TTS.
+different selected text is refused. Only providers advertising TextPattern are inspected; element names/values and document contents are not read. The source window must still be in front when the lookup starts; a window switch after that does not discard the selection already being read.
 
 
 ### Narration UI Automation lifetime

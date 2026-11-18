@@ -234,7 +234,8 @@ model = "kokoro"
 voice = "af_bella"
 ```
 
-Select text and press Ctrl+Alt+R to read it aloud. Press again or Escape to stop.
+Select text and press Ctrl+Alt+R to read it aloud. Press again to stop; starting a dictation
+stops it too. Escape and switching windows do not.
 Dictation keeps its own shortcut and never depends on selection lookup. An empty legacy
 `tts.hotkey` uses Ctrl+Alt+R; overlapping dictation/narration bindings are rejected.
 Selection lookup runs on a bounded worker so slow providers cannot delay dictation stop/cancel.
