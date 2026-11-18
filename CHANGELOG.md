@@ -7,6 +7,14 @@ Each release is a tag; the zip, its `SHA256SUMS` and a build-provenance attestat
 published from it. 0.1.0 to 0.4.0 were released privately, under MIT, before this repository
 went public; their notes are kept below.
 
+## Unreleased
+
+Changed
+- A dictation of room tone with a few taps or clicks is discarded as silent before any request,
+  instead of being typed as whatever whisper made of it (`*crickets*`). The test is now the
+  95th-percentile 10 ms window at or under -40 dBFS, not every window; `byovox check` prints
+  that level.
+
 ## 0.7.0 — 2026-11-18
 
 Added

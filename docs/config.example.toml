@@ -71,9 +71,9 @@ connect_timeout_s = 5
 # with it (see [stt.by_language]), and asks for plain `json`, which is the setting such a
 # server needs — set `no_speech_warn = 0.0` with it, since the warning cue reads the same
 # scores.
-# Separately, and whatever this is set to, a capture with no 10 ms window above -40 dBFS (a
-# muted or dead microphone) is discarded before any request: whisper can type a stock phrase
-# over it with a score this gate trusts.
+# Separately, and whatever this is set to, a capture whose 95th-percentile 10 ms window is at
+# or under -40 dBFS (a muted or dead microphone, or room tone with a few taps) is discarded
+# before any request: whisper can type a stock phrase over it with a score this gate trusts.
 no_speech_threshold = 0.3
 
 # Play the warning cue when any segment of a *kept* transcript scores above this — a
