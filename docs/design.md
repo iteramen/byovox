@@ -30,7 +30,8 @@ whisper.cpp server that `[stt.server]` starts and stops, but it runs as its own 
 
 [src/main.rs](../src/main.rs) is the CLI (`byovox --help`). Bare `byovox` starts the daemon;
 `run` runs it in the console; `toggle`, `quit`, `status` and `last` talk to it over IPC;
-`setup`, `check`, `hotkey`, `config` and `autostart` work on the config and the machine. All
+`setup`, `check`, `hotkey`, `config` and `autostart` work on the config and the machine;
+`update` installs the latest release over a zip install. All
 logic lives in the library ([src/lib.rs](../src/lib.rs)).
 
 ### The pipeline is a state machine
@@ -238,7 +239,9 @@ that follow the default output device.
 **Autostart:** a `byovox` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
 starting `byovox-daemon`, with any `--config` made absolute. **Updates**
 ([src/update.rs](../src/update.rs)): at most one unauthenticated request a day for the latest
-GitHub release, off with `update.check = false`; nothing is downloaded or installed.
+GitHub release, off with `update.check = false`; the check downloads and installs nothing.
+`byovox update` does, only when run: it verifies the release zip against its `SHA256SUMS` and
+renames the new pair in beside the running exe, putting the old pair back if a rename fails.
 
 ## Testing and releases
 

@@ -17,6 +17,10 @@ pub struct MockServer {
 
 impl MockServer {
     pub fn start(status: u16, body: &str) -> MockServer {
+        Self::start_bytes(status, body.as_bytes())
+    }
+
+    pub fn start_bytes(status: u16, body: &[u8]) -> MockServer {
         Self::serve(vec![Reply::Raw(Self::response(status, body))])
     }
 
@@ -38,13 +42,16 @@ impl MockServer {
     }
 
     pub fn start_closing_first(status: u16, body: &str) -> MockServer {
-        Self::serve(vec![Reply::Close, Reply::Raw(Self::response(status, body))])
+        Self::serve(vec![
+            Reply::Close,
+            Reply::Raw(Self::response(status, body.as_bytes())),
+        ])
     }
 
     pub fn start_then(first: (u16, &str), then: (u16, &str)) -> MockServer {
         Self::serve(vec![
-            Reply::Raw(Self::response(first.0, first.1)),
-            Reply::Raw(Self::response(then.0, then.1)),
+            Reply::Raw(Self::response(first.0, first.1.as_bytes())),
+            Reply::Raw(Self::response(then.0, then.1.as_bytes())),
         ])
     }
 
@@ -62,12 +69,14 @@ impl MockServer {
         self.requests.lock().unwrap().clone()
     }
 
-    fn response(status: u16, body: &str) -> Vec<u8> {
-        format!(
-            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+    fn response(status: u16, body: &[u8]) -> Vec<u8> {
+        let mut r = format!(
+            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         )
-        .into_bytes()
+        .into_bytes();
+        r.extend_from_slice(body);
+        r
     }
 
     /// Serves connection *i* with `replies[i]`; the last entry repeats forever.

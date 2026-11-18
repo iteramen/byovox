@@ -10,6 +10,10 @@ went public; their notes are kept below.
 ## Unreleased
 
 Added
+- `byovox update` installs the latest release over a zip install: it checks the zip against the
+  release's `SHA256SUMS`, swaps in the new `byovox.exe` and `byovox-daemon.exe`, starts the
+  daemon and prints the old and new version. The config is kept, a failed swap puts the old
+  pair back, and the daily check still only announces a release.
 - `polish.line_breaks` (default off): say "new line" or "new paragraph" and the `type` rung
   breaks the line with Shift+Enter. Pasted text and Windows Terminal, console, mintty and ConEmu
   windows still get a space.

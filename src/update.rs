@@ -1,5 +1,6 @@
 //! The daily update check: one unauthenticated `GET` of the latest release, at most once per 24 h, never when `update.check = false`.
-//! Yields a `Release` only for a newer `MAJOR.MINOR.PATCH`; every failure is one INFO line. Nothing is installed.
+//! Yields a `Release` only for a newer `MAJOR.MINOR.PATCH`; every failure is one INFO line. The check installs nothing.
+//! `byovox update` is the only install: `stage` downloads and verifies the latest release beside the running exe, `swap` puts it in place.
 
 use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
@@ -7,7 +8,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::deploy;
+
 pub const LATEST_URL: &str = "https://api.github.com/repos/iteramen/byovox/releases/latest";
+
+/// Where a release's assets are fetched from: built from the tag, never read from the API reply.
+pub fn release_download(tag: &str, name: &str) -> String {
+    format!("https://github.com/iteramen/byovox/releases/download/{tag}/{name}")
+}
 
 const DAY: u64 = 24 * 60 * 60;
 
@@ -35,7 +43,20 @@ struct Latest {
     html_url: String,
     #[serde(default)]
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<Asset>,
 }
+
+#[derive(Deserialize)]
+struct Asset {
+    name: String,
+    size: u64,
+}
+
+/// The pair `byovox update` replaces, named as in the release zip and in the folder it was unzipped to.
+pub const EXES: [&str; 2] = ["byovox.exe", "byovox-daemon.exe"];
+
+const CARGO_INSTALL: &str = "cargo install --git https://github.com/iteramen/byovox --locked";
 
 pub fn stamp_path() -> PathBuf {
     crate::config::data_dir().join("update.json")
@@ -131,7 +152,6 @@ fn write_stamp(path: &Path, stamp: &Stamp) -> std::io::Result<()> {
     std::fs::write(path, serde_json::to_vec(stamp)?)
 }
 
-/// A page that is not on github.com is refused: the tray hands it to `explorer`.
 fn fetch(
     url: &str,
     current: &str,
@@ -144,6 +164,11 @@ fn fetch(
         .user_agent(format!("byovox/{current}"))
         .build()
         .into();
+    latest(&agent, url)
+}
+
+/// A page that is not on github.com is refused: the tray hands it to `explorer`.
+fn latest(agent: &ureq::Agent, url: &str) -> Result<Latest, String> {
     let body = agent
         .get(url)
         .call()
@@ -159,6 +184,123 @@ fn fetch(
         ));
     }
     Ok(latest)
+}
+
+/// Downloads the latest release's zip and `SHA256SUMS` from the release `url` describes, and unpacks
+/// the verified pair into `dir` as `<name>.new`. Returns the release's version. Every refusal comes
+/// before anything is written to `dir`.
+pub fn stage(
+    agent: &ureq::Agent,
+    url: &str,
+    download: &dyn Fn(&str, &str) -> String,
+    current: &str,
+    dir: &Path,
+    scratch: &Path,
+) -> Result<String, String> {
+    // cargo keeps these beside the `bin` folder of every root it installs into.
+    if [".crates.toml", ".crates2.json"]
+        .iter()
+        .any(|m| dir.parent().is_some_and(|root| root.join(m).is_file()))
+    {
+        return Err(format!(
+            "this byovox was installed by cargo; update it with: {CARGO_INSTALL}"
+        ));
+    }
+    if let Some(missing) = EXES.iter().find(|n| !dir.join(n).is_file()) {
+        return Err(format!(
+            "{missing} is not in {}: byovox update replaces the pair unzipped from a release",
+            dir.display()
+        ));
+    }
+    let latest = latest(agent, url)?;
+    let tag = &latest.tag_name;
+    let version = tag.strip_prefix('v').unwrap_or(tag);
+    if latest.prerelease || !is_newer(version, current) {
+        return Err(format!(
+            "byovox {current} is up to date: the latest release is {tag}"
+        ));
+    }
+    let zip_name = format!("byovox-{tag}-x86_64-pc-windows-msvc.zip");
+    let asset = |name: &str| {
+        latest
+            .assets
+            .iter()
+            .find(|a| a.name == name)
+            .ok_or_else(|| format!("release {tag} has no {name}"))
+    };
+    let zip = asset(&zip_name)?;
+    asset("SHA256SUMS")?;
+    let sums = agent
+        .get(download(tag, "SHA256SUMS"))
+        .call()
+        .and_then(|mut r| r.body_mut().read_to_string())
+        .map_err(|e| format!("SHA256SUMS: {e}"))?;
+    let sha256 = sha256_for(&sums, &zip_name)
+        .ok_or_else(|| format!("SHA256SUMS has no checksum for {zip_name}"))?;
+    // Leaked into a `Pin`, whose fields are 'static; the command exits after one update.
+    let pin = deploy::Pin {
+        url: download(tag, &zip_name).leak(),
+        bytes: zip.size,
+        sha256: sha256.leak(),
+    };
+    let path = deploy::fetch(agent, &pin, scratch)?;
+    let unpacked = unpack(&path, dir);
+    let _ = std::fs::remove_file(&path);
+    unpacked?;
+    Ok(version.to_string())
+}
+
+/// The hash on the `sha256sum` line naming `file`: 64 hex digits, a space, then a space or `*`.
+fn sha256_for(sums: &str, file: &str) -> Option<String> {
+    sums.lines().find_map(|line| {
+        let (hash, rest) = line.split_once(' ')?;
+        let name = rest.strip_prefix([' ', '*'])?;
+        (name.trim_end() == file && hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| hash.to_ascii_lowercase())
+    })
+}
+
+fn unpack(zip: &Path, dir: &Path) -> Result<(), String> {
+    let failed = |e: &dyn std::fmt::Display| format!("unpacking {}: {e}", zip.display());
+    let file = std::fs::File::open(zip).map_err(|e| failed(&e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| failed(&e))?;
+    if let Some(missing) = EXES.iter().find(|n| archive.index_for_name(n).is_none()) {
+        return Err(failed(&format!("it has no {missing}")));
+    }
+    for name in EXES {
+        let mut entry = archive.by_name(name).map_err(|e| failed(&e))?;
+        let mut out =
+            std::fs::File::create(dir.join(format!("{name}.new"))).map_err(|e| failed(&e))?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| failed(&e))?;
+    }
+    Ok(())
+}
+
+/// Renames each exe in `dir` to `<name>.old` and its staged `<name>.new` into its place: a running
+/// exe can be renamed but not overwritten. A failure puts back every exe already moved.
+pub fn swap(dir: &Path) -> Result<(), String> {
+    let mut moved = Vec::new();
+    for name in EXES {
+        let exe = dir.join(name);
+        let old = dir.join(format!("{name}.old"));
+        let placed = std::fs::rename(&exe, &old)
+            .map(|()| moved.push((exe.clone(), old)))
+            .and_then(|()| std::fs::rename(dir.join(format!("{name}.new")), &exe));
+        if let Err(e) = placed {
+            let mut error = format!("replacing {name}: {e}");
+            for (exe, old) in moved.iter().rev() {
+                if let Err(e) = std::fs::rename(old, exe) {
+                    error.push_str(&format!(
+                        "; putting {} back failed ({e}): the previous one is {}",
+                        exe.display(),
+                        old.display()
+                    ));
+                }
+            }
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 /// Anything but a plain newer `MAJOR.MINOR.PATCH` (pre-release, build metadata, extra part, leading zero) is never newer.
@@ -408,6 +550,324 @@ mod tests {
         assert!(srv.requests().is_empty());
         assert!(!stamp.exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    const ZIP: &str = "byovox-v0.4.0-x86_64-pc-windows-msvc.zip";
+
+    fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let deflated = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for (name, body) in files {
+            w.start_file(*name, deflated).unwrap();
+            w.write_all(body).unwrap();
+        }
+        w.finish().unwrap().into_inner()
+    }
+
+    fn release_zip() -> Vec<u8> {
+        zip_of(&[
+            ("byovox.exe", b"new cli"),
+            ("byovox-daemon.exe", b"new daemon"),
+            ("README.md", b"readme"),
+        ])
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        ring::digest::digest(&ring::digest::SHA256, bytes)
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    fn sums_for(zip: &[u8]) -> String {
+        format!("{}  {ZIP}\n", sha256_hex(zip))
+    }
+
+    /// A release on loopback: the API reply on `api`, each asset on a server of its own.
+    struct Loopback {
+        api: MockServer,
+        zip: MockServer,
+        sums: MockServer,
+    }
+
+    fn loopback(base: &str, zip: &[u8], sums: &str, assets: &[&str]) -> Loopback {
+        let zip_srv = MockServer::start_bytes(200, zip);
+        let sums_srv = MockServer::start(200, sums);
+        let listed: Vec<String> = assets
+            .iter()
+            .map(|name| {
+                let size = if *name == "SHA256SUMS" {
+                    sums.len()
+                } else {
+                    zip.len()
+                };
+                // A URL the update must not use: it builds its own from the tag.
+                format!(
+                    r#"{{"name":"{name}","browser_download_url":"https://elsewhere.invalid/{name}","size":{size}}}"#
+                )
+            })
+            .collect();
+        let body = base.replace(
+            r#""assets":[]"#,
+            &format!(r#""assets":[{}]"#, listed.join(",")),
+        );
+        Loopback {
+            api: MockServer::start(200, &body),
+            zip: zip_srv,
+            sums: sums_srv,
+        }
+    }
+
+    impl Loopback {
+        fn at(&self) -> impl Fn(&str, &str) -> String + '_ {
+            move |_, name| {
+                let srv = if name == "SHA256SUMS" {
+                    &self.sums
+                } else {
+                    &self.zip
+                };
+                format!("{}/{name}", srv.url())
+            }
+        }
+    }
+
+    #[test]
+    fn assets_are_fetched_from_the_release_tag_on_github() {
+        assert_eq!(
+            release_download("v0.8.0", "SHA256SUMS"),
+            "https://github.com/iteramen/byovox/releases/download/v0.8.0/SHA256SUMS"
+        );
+    }
+
+    /// An install folder holding the old pair, and a scratch folder beside it.
+    fn installed(test: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = temp_dir(test);
+        let dir = root.join("byovox");
+        let scratch = root.join("scratch");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&scratch).unwrap();
+        std::fs::write(dir.join("byovox.exe"), "old cli").unwrap();
+        std::fs::write(dir.join("byovox-daemon.exe"), "old daemon").unwrap();
+        (root, dir, scratch)
+    }
+
+    fn plain() -> ureq::Agent {
+        ureq::Agent::new_with_defaults()
+    }
+
+    fn files(dir: &Path) -> Vec<(String, String)> {
+        let mut all: Vec<(String, String)> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| {
+                let e = e.unwrap();
+                (
+                    e.file_name().into_string().unwrap(),
+                    std::fs::read_to_string(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        all.sort();
+        all
+    }
+
+    fn untouched() -> Vec<(String, String)> {
+        vec![
+            ("byovox-daemon.exe".into(), "old daemon".into()),
+            ("byovox.exe".into(), "old cli".into()),
+        ]
+    }
+
+    #[test]
+    fn an_update_stages_the_verified_pair_and_swap_puts_it_in_place() {
+        let (root, dir, scratch) = installed("update");
+        let zip = release_zip();
+        let sums = format!("{}  other.zip\n{}", sha256_hex(b"other"), sums_for(&zip));
+        let rel = loopback(&release("v0.4.0"), &zip, &sums, &[ZIP, "SHA256SUMS"]);
+        let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
+        assert_eq!(got.as_deref(), Ok("0.4.0"));
+        assert_eq!(rel.zip.requests().len(), 1);
+        assert_eq!(rel.sums.requests().len(), 1);
+        assert!(files(&scratch).is_empty(), "the zip was left behind");
+        swap(&dir).unwrap();
+        let landed = files(&dir);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            landed,
+            [
+                ("byovox-daemon.exe", "new daemon"),
+                ("byovox-daemon.exe.old", "old daemon"),
+                ("byovox.exe", "new cli"),
+                ("byovox.exe.old", "old cli"),
+            ]
+            .map(|(n, b)| (n.to_string(), b.to_string()))
+        );
+    }
+
+    #[test]
+    fn a_checksum_mismatch_is_refused_and_nothing_is_staged() {
+        let (root, dir, scratch) = installed("mismatch");
+        let zip = release_zip();
+        let rel = loopback(
+            &release("v0.4.0"),
+            &zip,
+            &sums_for(b"some other zip"),
+            &[ZIP, "SHA256SUMS"],
+        );
+        let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
+        let (in_dir, in_scratch) = (files(&dir), files(&scratch));
+        std::fs::remove_dir_all(&root).unwrap();
+        let e = got.unwrap_err();
+        assert!(e.contains("does not match"), "{e}");
+        assert!(e.contains(&sha256_hex(&zip)), "{e}");
+        assert_eq!(in_dir, untouched());
+        assert!(in_scratch.is_empty(), "{in_scratch:?}");
+    }
+
+    #[test]
+    fn a_missing_asset_checksum_line_or_exe_is_refused_and_nothing_is_staged() {
+        let zip = release_zip();
+        let half = zip_of(&[("byovox.exe", b"new cli")]);
+        let both = vec![ZIP, "SHA256SUMS"];
+        let cases = [
+            ("no zip", &zip, sums_for(&zip), vec!["SHA256SUMS"], ZIP),
+            ("no sums", &zip, sums_for(&zip), vec![ZIP], "SHA256SUMS"),
+            (
+                "no line",
+                &zip,
+                format!(
+                    "{}  other.zip
+",
+                    sha256_hex(&zip)
+                ),
+                both.clone(),
+                "no checksum",
+            ),
+            (
+                "no daemon",
+                &half,
+                sums_for(&half),
+                both,
+                "byovox-daemon.exe",
+            ),
+        ];
+        for (case, zip, sums, assets, named) in cases {
+            let (root, dir, scratch) = installed(&format!("missing-{}", case.replace(' ', "-")));
+            let rel = loopback(&release("v0.4.0"), zip, &sums, &assets);
+            let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
+            let in_dir = files(&dir);
+            std::fs::remove_dir_all(&root).unwrap();
+            let e = got.unwrap_err();
+            assert!(e.contains(named), "{case}: {e}");
+            assert_eq!(in_dir, untouched(), "{case}");
+        }
+    }
+
+    #[test]
+    fn a_release_not_newer_is_refused_before_any_download() {
+        let zip = release_zip();
+        for (tag, prerelease) in [("v0.3.0", false), ("v0.2.9", false), ("v0.4.0", true)] {
+            let (root, dir, scratch) = installed(&format!("not-newer-{tag}-{prerelease}"));
+            let mut base = release(tag);
+            if prerelease {
+                base = base.replace(r#""prerelease":false"#, r#""prerelease":true"#);
+            }
+            let rel = loopback(&base, &zip, &sums_for(&zip), &[ZIP, "SHA256SUMS"]);
+            let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
+            let in_dir = files(&dir);
+            std::fs::remove_dir_all(&root).unwrap();
+            let e = got.unwrap_err();
+            assert!(e.contains("up to date"), "{tag}: {e}");
+            assert!(rel.zip.requests().is_empty() && rel.sums.requests().is_empty());
+            assert_eq!(in_dir, untouched(), "{tag}");
+        }
+    }
+
+    #[test]
+    fn a_cargo_install_or_a_folder_without_the_pair_is_refused_before_any_request() {
+        for manifest in [".crates.toml", ".crates2.json"] {
+            let (root, _, scratch) = installed(&format!("cargo{manifest}"));
+            let bin = root.join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(root.join(manifest), "").unwrap();
+            for exe in EXES {
+                std::fs::write(bin.join(exe), "cargo build").unwrap();
+            }
+            let api = MockServer::start(200, &release("v0.4.0"));
+            let got = stage(
+                &plain(),
+                api.url(),
+                &release_download,
+                "0.3.0",
+                &bin,
+                &scratch,
+            );
+            std::fs::remove_dir_all(&root).unwrap();
+            let e = got.unwrap_err();
+            assert!(e.contains(CARGO_INSTALL), "{manifest}: {e}");
+            assert!(api.requests().is_empty(), "{manifest}");
+        }
+        let (root, dir, scratch) = installed("no-daemon");
+        std::fs::remove_file(dir.join("byovox-daemon.exe")).unwrap();
+        let api = MockServer::start(200, &release("v0.4.0"));
+        let got = stage(
+            &plain(),
+            api.url(),
+            &release_download,
+            "0.3.0",
+            &dir,
+            &scratch,
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(got.unwrap_err().contains("byovox-daemon.exe is not in"));
+        assert!(api.requests().is_empty());
+    }
+
+    #[test]
+    fn the_real_agent_refuses_a_plain_http_release() {
+        let (root, dir, scratch) = installed("https-only");
+        let api = MockServer::start(200, &release("v0.4.0"));
+        let got = stage(
+            &deploy::agent(),
+            api.url(),
+            &release_download,
+            "0.3.0",
+            &dir,
+            &scratch,
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(got.is_err(), "{got:?}");
+        assert!(api.requests().is_empty(), "a request reached the server");
+    }
+
+    #[test]
+    fn a_failed_replace_puts_the_old_pair_back() {
+        let (root, dir, _) = installed("rollback");
+        // The daemon has nothing staged, so its replace fails after the CLI's has succeeded.
+        std::fs::write(dir.join("byovox.exe.new"), "new cli").unwrap();
+        let got = swap(&dir);
+        let landed = files(&dir);
+        std::fs::remove_dir_all(&root).unwrap();
+        let e = got.unwrap_err();
+        assert!(e.contains("replacing byovox-daemon.exe"), "{e}");
+        assert_eq!(landed, untouched());
+    }
+
+    #[test]
+    fn sha256sums_lines_are_read_as_sha256sum_writes_them() {
+        let h = "A".repeat(64);
+        let sums = format!(
+            "{h}  a.zip\r\n{}  b.zip\n{} *c.zip\nshort  d.zip\n",
+            "b".repeat(64),
+            "c".repeat(64)
+        );
+        assert_eq!(sha256_for(&sums, "a.zip"), Some("a".repeat(64)));
+        assert_eq!(sha256_for(&sums, "b.zip"), Some("b".repeat(64)));
+        assert_eq!(sha256_for(&sums, "c.zip"), Some("c".repeat(64)));
+        assert_eq!(sha256_for(&sums, "d.zip"), None);
+        assert_eq!(sha256_for(&sums, "a"), None);
     }
 
     #[test]

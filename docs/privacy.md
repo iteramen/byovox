@@ -92,17 +92,23 @@ neither sets nor sees; check the policy of any server you did not set up yoursel
 
 ## Other network requests
 
-Apart from the servers you configure, byovox makes two kinds of request:
+Apart from the servers you configure, byovox makes three kinds of request:
 
 - **The update check.** When the daemon starts, and only if the last check was 24 hours or more
   ago, it sends one unauthenticated `GET https://api.github.com/repos/iteramen/byovox/releases/latest`
   (`src/update.rs` — `LATEST_URL`, `check`, `fetch`; `src/daemon.rs` — `start`). The request
   carries a `User-Agent: byovox/<version>` header and the standard `Host`, `Accept` and
   `Accept-Encoding` headers, and nothing about you, your configuration or your dictations. GitHub
-  sees your IP address and byovox version. A newer release is shown in the tray; nothing is
-  downloaded or installed, and its release page opens in your browser only if you click the tray
-  item (`src/ui.rs` — `MenuAction::OpenRelease`). `update.check = false` turns the check off
-  (`update::spawn`).
+  sees your IP address and byovox version. A newer release is shown in the tray; the check
+  downloads and installs nothing, and its release page opens in your browser only if you click
+  the tray item (`src/ui.rs` — `MenuAction::OpenRelease`). `update.check = false` turns the
+  check off (`update::spawn`).
+- **`byovox update`.** Only when you run it, it asks the same `LATEST_URL` for the latest
+  release, then downloads that release's `SHA256SUMS` and Windows zip from `github.com`,
+  following its redirects to GitHub's download host, over HTTPS only (`src/main.rs` —
+  `update_cmd`; `src/update.rs` — `stage`; `src/deploy.rs` — `agent`, `fetch`). These requests
+  carry nothing about you, your configuration or your dictations. The zip is deleted once its
+  `byovox.exe` and `byovox-daemon.exe` are unpacked, and your config is not changed.
 - **The whisper.cpp download.** If nothing answers on `127.0.0.1:8770`, `byovox setup` offers,
   default no, to download a whisper.cpp server build and a Whisper model. Only after a yes, it
   fetches them over HTTPS only from `github.com` (the build) and `huggingface.co` (the model),
@@ -144,7 +150,8 @@ running daemon over a named pipe on your computer (`src/ipc.rs` — `socket_name
 
 byovox has no installer. Deleting `%APPDATA%\byovox` and `%LOCALAPPDATA%\byovox`, and running
 `byovox autostart --disable`, removes everything it stored, except a `capture_log.dir` you set
-elsewhere.
+elsewhere and the previous pair, `byovox.exe.old` and `byovox-daemon.exe.old`, that `byovox
+update` leaves beside the exes.
 
 ## What is not collected
 
