@@ -1,5 +1,6 @@
 //! Explicit manual smoke: select this fixture's text, Ctrl+Alt+R to read, again to stop.
-//! No input injection, microphone, clipboard or ordinary document is used.
+//! Reading sends Copy to this window and puts the previous clipboard text back; no microphone
+//! or ordinary document is used.
 #[cfg(windows)]
 mod probe {
     use byovox::{
@@ -189,7 +190,7 @@ mod probe {
         }
         .map_err(|_| "Test window unavailable")?;
         let _edit=unsafe{CreateWindowExW(WINDOW_EX_STYLE(0),w!("EDIT"),
-            w!("Read aloud test. This is harmless synthetic English text. Select this paragraph and press Control, Alt and R to hear it. Press the same keys again while it is speaking to stop playback. No microphone or clipboard is used by this validation window."),
+            w!("Read aloud test. This is harmless synthetic English text. Select this paragraph and press Control, Alt and R to hear it. Press the same keys again while it is speaking to stop playback. No microphone is used; the clipboard text is put back after the copy."),
             WINDOW_STYLE(WS_CHILD.0|WS_VISIBLE.0|0x0004|0x0800),20,25,790,190,Some(window),None,None,None)}.map_err(|_|"Test field unavailable")?;
         let status = unsafe {
             CreateWindowExW(

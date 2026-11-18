@@ -235,43 +235,18 @@ voice = "af_bella"
 ```
 
 Select text and press Ctrl+Alt+R to read it aloud. Press again to stop; starting a dictation
-stops it too. Escape does not, and once reading starts neither does switching windows.
-Dictation keeps its own shortcut and never depends on selection lookup. An empty legacy
-`tts.hotkey` uses Ctrl+Alt+R; overlapping dictation/narration bindings are rejected.
-Selection lookup runs on a bounded worker so slow providers cannot delay dictation stop/cancel.
+stops it too, Escape does not. Dictation keeps its own shortcut; an empty `tts.hotkey` uses
+Ctrl+Alt+R, and a binding that overlaps dictation's is rejected.
 
-The focused control and visible foreground text-selection providers are checked, so highlighting
-chat text can work even when the composer retains focus. Only explicit non-empty TextPattern
-ranges are read first. If none is available or the window exposes over 128 providers, guarded Copy fallback is enabled by default
-(`tts.copy_fallback = false` disables it). Passwords, ambiguous selections,
-provider errors and scan timeouts refuse narration without opening the microphone.
-The selected range or the app's Copy result goes to your TTS server. Reading never types, records or saves text/audio. The Copy fallback temporarily uses the clipboard;
-clipboard history, sync or managers may retain that text. A changed foreground window before selection is
-read is refused. The server can retain requests under its own policy.
+When you release the shortcut, byovox copies the selection with the app's own Copy (Ctrl+C, or
+Ctrl+Insert in Windows Terminal, where Ctrl+C would interrupt the program), then puts your
+previous clipboard text back. Stay in the window until it starts reading, then go where you
+like. Nothing selected means nothing is read. Other console windows are not supported. While
+the text is on the clipboard, Windows clipboard history and sync can keep it. The text goes to
+your TTS server, which can retain requests under its own policy; byovox never types, records or
+saves it.
 
-English is the first target. Hebrew/Russian endpoint and voice slots are scaffolded but require
-supported server voices; missing voices refuse reading, with no English substitution. Routing is
-by dominant script per chunk, not semantic language detection: Latin-script text uses English.
-`byovox check` reports configuration only and does not exercise read-aloud selection or playback.
-
-
-Copy fallback waits for shortcut release, preserves supported clipboard formats and restores
-only if no newer clipboard update has arrived. It refuses unsupported/oversized clipboard snapshots,
-password fields, unsupported terminal windows, stale updates and changed foreground controls.
-Select text first: applications define Copy behavior, and some copy a current line without a
-selection. Scintilla editors such as Notepad++ are explicitly checked for an empty selection.
-Support is app-dependent; the current qualification matrix is in [docs/testing.md](docs/testing.md).
-
-
-Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
-binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
-refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
-Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
-running application when no selection exists. No fresh clipboard result means no
-narration. Custom bindings and application handling of an unhandled chord remain source-app
-behavior; existing clipboard, source/focus and cancellation guards still apply.
-
-Automatic fresh Copy accepts helper-process and ownerless clipboard results when the source
-window and focused control remain unchanged. A fresh result is not proof of provenance: another
-app writing during the Copy interval cannot be excluded. This tradeoff was approved for broad
-app support. Restoration still refuses a changed clipboard sequence or observed owner.
+English is the first target. Hebrew/Russian endpoint and voice slots need supported server
+voices; a missing voice refuses reading, with no English substitution. Routing is by dominant
+script per chunk, not language detection: Latin-script text uses English. `byovox check` reports
+the configuration only and does not try a read.
