@@ -19,6 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::Interface;
 
 use super::audio::Apartment;
+use super::clipboard::Saved;
 use super::hotkey::INJECT_MARKER;
 use crate::inject::{Inject, Target};
 
@@ -182,15 +183,13 @@ impl Inject for PasteInject {
     }
     fn inject(&mut self, text: &str) -> Result<(), String> {
         let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
-        let previous = cb.get_text().ok();
+        let previous = Saved::of(&mut cb);
         cb.set_text(text)
             .map_err(|e| format!("clipboard set: {e}"))?;
         let sent = send(&ctrl_v());
         std::thread::sleep(Duration::from_millis(150));
-        if let Some(p) = previous
-            && let Err(e) = cb.set_text(p)
-        {
-            tracing::warn!(error = %e, "could not restore the previous clipboard text");
+        if let Some(p) = previous {
+            p.restore(&mut cb);
         }
         sent
     }
@@ -863,5 +862,120 @@ mod tests {
             cb.set_text(p).expect("restore");
             println!("restored: {:?}", cb.get_text().ok());
         }
+    }
+
+    static CLIPBOARD: Mutex<()> = Mutex::new(());
+
+    /// Puts back the clipboard a test found, even when the test panics.
+    struct Keep(arboard::Clipboard, Option<Saved>);
+    impl Drop for Keep {
+        fn drop(&mut self) {
+            if let Some(found) = self.1.take() {
+                found.restore(&mut self.0);
+            }
+        }
+    }
+
+    fn text() -> Saved {
+        Saved::Text("byovox clipboard probe שלום".into())
+    }
+
+    fn image() -> Saved {
+        Saved::Image(arboard::ImageData {
+            width: 2,
+            height: 2,
+            bytes: vec![
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+            ]
+            .into(),
+        })
+    }
+
+    fn files() -> Saved {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        Saved::Files(vec![dir.join("Cargo.toml"), dir.join("Cargo.lock")])
+    }
+
+    fn assert_same(got: Option<Saved>, want: Saved, when: &str) {
+        let shown = format!("{when}: {got:?} is not {want:?}");
+        let same = match (got, want) {
+            (Some(Saved::Text(a)), Saved::Text(b)) => a == b,
+            (Some(Saved::Image(a)), Saved::Image(b)) => {
+                (a.width, a.height, a.bytes) == (b.width, b.height, b.bytes)
+            }
+            (Some(Saved::Files(a)), Saved::Files(b)) => a == b,
+            _ => false,
+        };
+        assert!(same, "{shown}");
+    }
+
+    /// Puts `probe` on the clipboard, borrows it from a form whose first box has a selection, and
+    /// expects `probe` back.
+    fn comes_back(probe: fn() -> Saved, borrow: fn(HWND)) {
+        let _one = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cb = arboard::Clipboard::new().expect("clipboard");
+        let found = Saved::of(&mut cb);
+        let mut keep = Keep(cb, found);
+        let title = unique_title("clipboard");
+        let _form = open_form(
+            &title,
+            "New-Object System.Windows.Forms.TextBox",
+            "$first.Text = 'selected probe'; $first.SelectAll()",
+        );
+        assert!(
+            wait_for(|| foreground_title() == title),
+            "the form never took the foreground"
+        );
+        probe().restore(&mut keep.0);
+        assert_same(Saved::of(&mut keep.0), probe(), "before");
+        // SAFETY: takes no arguments.
+        borrow(unsafe { GetForegroundWindow() });
+        assert_same(Saved::of(&mut keep.0), probe(), "after");
+    }
+
+    fn paste(_: HWND) {
+        PasteInject.inject("pasted probe").expect("paste");
+    }
+
+    fn read_aloud(window: HWND) {
+        let copied =
+            super::super::selection_copy::copy_selection(window.0 as isize, 0x87, &|| true);
+        assert_eq!(copied.expect("copy"), "selected probe");
+    }
+
+    #[test]
+    #[ignore]
+    fn paste_puts_back_clipboard_text() {
+        comes_back(text, paste);
+    }
+
+    #[test]
+    #[ignore]
+    fn paste_puts_back_a_clipboard_image() {
+        comes_back(image, paste);
+    }
+
+    #[test]
+    #[ignore]
+    fn paste_puts_back_a_clipboard_file_list() {
+        comes_back(files, paste);
+    }
+
+    #[test]
+    #[ignore]
+    fn read_aloud_copy_puts_back_clipboard_text() {
+        comes_back(text, read_aloud);
+    }
+
+    #[test]
+    #[ignore]
+    fn read_aloud_copy_puts_back_a_clipboard_image() {
+        comes_back(image, read_aloud);
+    }
+
+    #[test]
+    #[ignore]
+    fn read_aloud_copy_puts_back_a_clipboard_file_list() {
+        comes_back(files, read_aloud);
     }
 }

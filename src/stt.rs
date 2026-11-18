@@ -1,6 +1,7 @@
 //! Speech-to-text client: one multipart POST to `{base_url}/audio/transcriptions`, and `Routed`,
 //! which picks the client for a dictation's language when `[stt.by_language]` has a lane.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::lang::{Lang, SttLanguage};
@@ -58,7 +59,14 @@ pub struct SttClient {
     timeout: Duration,
     connect_timeout: Duration,
     agent: ureq::Agent,
+    /// The host and port alone: a `base_url` can carry `user:pass@`, and the log is kept a week.
+    host: String,
+    /// Set once this server has answered `language_candidates` with a 4xx naming it.
+    candidates_refused: AtomicBool,
 }
+
+/// The whisper.cpp-server extension field some servers refuse.
+const CANDIDATES: &str = "language_candidates";
 
 impl SttClient {
     /// `scored` asks for `verbose_json`, the only format carrying `segments[].no_speech_prob`.
@@ -85,6 +93,8 @@ impl SttClient {
             timeout,
             connect_timeout,
             agent: config.into(),
+            host: crate::config::host_of(base_url).to_string(),
+            candidates_refused: AtomicBool::new(false),
         }
     }
 
@@ -94,6 +104,7 @@ impl SttClient {
         language: &SttLanguage,
         prompt: Option<&str>,
         vad: bool,
+        candidates: bool,
     ) -> (String, Vec<u8>) {
         let mut m = Multipart::new();
         m.file("file", "clip.wav", "audio/wav", wav);
@@ -105,7 +116,9 @@ impl SttClient {
             if self.scored { "verbose_json" } else { "json" },
         );
         for (name, value) in language.form_fields() {
-            m.text(name, &value);
+            if candidates || name != CANDIDATES {
+                m.text(name, &value);
+            }
         }
         if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
             m.text("prompt", p);
@@ -299,17 +312,38 @@ impl Transcriber for SttClient {
         language: &SttLanguage,
         prompt: Option<&str>,
     ) -> Result<Transcript, String> {
-        let vad = is_long_take(wav);
-        let (mut status, mut text) = self.send(self.form(wav, language, prompt, vad))?;
-        // A whisper-server started without `--vad-model` answers `vad=true` with HTTP 500,
-        // and a hosted API may refuse a field it does not know: the take goes again without it.
-        if vad && !(200..300).contains(&status) {
-            tracing::warn!(
-                status,
-                "stt refused vad=true for a long take; re-sending without it"
-            );
-            (status, text) = self.send(self.form(wav, language, prompt, false))?;
-        }
+        let mut vad = is_long_take(wav);
+        let mut candidates = !self.candidates_refused.load(Ordering::Relaxed)
+            && language
+                .form_fields()
+                .iter()
+                .any(|(name, _)| *name == CANDIDATES);
+        // Each resend clears one flag, so a dictation makes at most three requests.
+        let (status, text) = loop {
+            let (status, text) = self.send(self.form(wav, language, prompt, vad, candidates))?;
+            if candidates && (400..500).contains(&status) && text.contains(CANDIDATES) {
+                candidates = false;
+                if !self.candidates_refused.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(
+                        status,
+                        host = %self.host,
+                        "stt refused language_candidates; re-sending without it and not sending it again"
+                    );
+                }
+                continue;
+            }
+            // A whisper-server started without `--vad-model` answers `vad=true` with HTTP 500,
+            // and a hosted API may refuse a field it does not know: the take goes again without it.
+            if vad && !(200..300).contains(&status) {
+                tracing::warn!(
+                    status,
+                    "stt refused vad=true for a long take; re-sending without it"
+                );
+                vad = false;
+                continue;
+            }
+            break (status, text);
+        };
         if !(200..300).contains(&status) {
             return Err(format!(
                 "stt HTTP {status}: {}",
@@ -559,6 +593,71 @@ mod tests {
         assert!(req.contains("name=\"language_candidates\"\r\n\r\nen,ru\r\n"));
         assert!(!req.contains("name=\"language\"\r\n"));
         assert!(!req.contains("name=\"prompt\""));
+    }
+
+    fn en_ru() -> SttLanguage {
+        SttLanguage::Auto {
+            candidates: vec![Lang::parse("en").unwrap(), Lang::parse("ru").unwrap()],
+            prior: None,
+        }
+    }
+
+    const CANDIDATES_FIELD: &str = "name=\"language_candidates\"";
+
+    #[test]
+    fn a_refused_candidates_field_is_dropped_for_the_retry_and_the_rest_of_the_run() {
+        let srv = MockServer::start_then(
+            (400, r#"{"error":"unknown field language_candidates"}"#),
+            (200, r#"{"text":"x"}"#),
+        );
+        let c = client(srv.url());
+        assert_eq!(c.transcribe(b"RIFF", &en_ru(), None).unwrap().text, "x");
+        assert_eq!(c.transcribe(b"RIFF", &en_ru(), None).unwrap().text, "x");
+        let reqs = srv.requests();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[0].contains(CANDIDATES_FIELD), "first request had none");
+        assert!(!reqs[1].contains(CANDIDATES_FIELD), "retry kept it");
+        assert!(
+            !reqs[2].contains(CANDIDATES_FIELD),
+            "next dictation sent it"
+        );
+    }
+
+    #[test]
+    fn an_accepted_candidates_field_keeps_being_sent() {
+        let srv = MockServer::start(200, r#"{"text":"x"}"#);
+        let c = client(srv.url());
+        c.transcribe(b"RIFF", &en_ru(), None).unwrap();
+        c.transcribe(b"RIFF", &en_ru(), None).unwrap();
+        let reqs = srv.requests();
+        assert_eq!(reqs.len(), 2);
+        assert!(reqs.iter().all(|r| r.contains(CANDIDATES_FIELD)), "dropped");
+    }
+
+    #[test]
+    fn an_unrelated_400_is_not_sent_again() {
+        let srv = MockServer::start(400, r#"{"error":"unknown model"}"#);
+        let c = client(srv.url());
+        let err = c.transcribe(b"RIFF", &en_ru(), None).unwrap_err();
+        assert!(err.starts_with("stt HTTP 400"), "{err}");
+        c.transcribe(b"RIFF", &en_ru(), None).unwrap_err();
+        let reqs = srv.requests();
+        assert_eq!(reqs.len(), 2, "sent again");
+        assert!(reqs.iter().all(|r| r.contains(CANDIDATES_FIELD)), "dropped");
+    }
+
+    #[test]
+    fn a_long_take_refusing_both_fields_stops_after_three_requests() {
+        let srv = MockServer::start(400, r#"{"error":"unknown field language_candidates"}"#);
+        let err = client(srv.url())
+            .transcribe(&wav_of(SIXTY_S + 1), &en_ru(), None)
+            .unwrap_err();
+        assert!(err.starts_with("stt HTTP 400"), "{err}");
+        let reqs = srv.requests();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[0].contains(CANDIDATES_FIELD) && reqs[0].contains("name=\"vad\""));
+        assert!(!reqs[1].contains(CANDIDATES_FIELD) && reqs[1].contains("name=\"vad\""));
+        assert!(!reqs[2].contains(CANDIDATES_FIELD) && !reqs[2].contains("name=\"vad\""));
     }
 
     fn wav_of(n: usize) -> Vec<u8> {

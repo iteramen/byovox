@@ -374,6 +374,25 @@ pub fn host_of(base_url: &str) -> &str {
     authority.rsplit('@').next().unwrap_or_default()
 }
 
+/// Refuses a `base_url` on `0.0.0.0` or `[::]`: a server listens there, but a client cannot connect to it.
+pub fn refuse_unspecified_host(key: &str, base_url: &str) -> Result<(), String> {
+    let authority = host_of(base_url);
+    let host = match authority.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or_default(),
+        None => authority.split(':').next().unwrap_or_default(),
+    };
+    if host
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_unspecified())
+    {
+        return Err(format!(
+            "{key} uses host {host}, which a server listens on but a client cannot connect to: \
+             use 127.0.0.1 or the server's address"
+        ));
+    }
+    Ok(())
+}
+
 /// `~/x` → home-relative; anything else unchanged.
 pub fn expand_home(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\"))
@@ -418,6 +437,7 @@ fn validate(cfg: &Config) -> Result<()> {
             "stt.base_url is empty: set it to your speech-to-text server, e.g. http://127.0.0.1:8770/v1"
         );
     }
+    refuse_unspecified_host("stt.base_url", &cfg.stt.base_url).map_err(anyhow::Error::msg)?;
     for (code, lane) in &cfg.stt.by_language {
         if crate::lang::Lang::parse(code).is_none() {
             bail!("stt.by_language.{code}: expected an ISO 639-1 code such as `he`");
@@ -427,6 +447,8 @@ fn validate(cfg: &Config) -> Result<()> {
                 "stt.by_language.{code}.base_url is empty: set it to that language's speech-to-text server"
             );
         }
+        refuse_unspecified_host(&format!("stt.by_language.{code}.base_url"), &lane.base_url)
+            .map_err(anyhow::Error::msg)?;
         if !lane.api_key_env.is_empty() && lane.inherit_token {
             bail!("stt.by_language.{code}: set api_key_env or inherit_token = true, not both");
         }
@@ -437,6 +459,8 @@ fn validate(cfg: &Config) -> Result<()> {
                 "polish.base_url is empty: set it to your chat-completions gateway, or set polish.enabled = false"
             );
         }
+        refuse_unspecified_host("polish.base_url", &cfg.polish.base_url)
+            .map_err(anyhow::Error::msg)?;
         if cfg.polish.model.trim().is_empty() {
             bail!(
                 "polish.model is empty: name the model your gateway serves, or set polish.enabled = false"
@@ -773,6 +797,48 @@ mod tests {
         )
         .unwrap();
         assert!(load(&path).is_ok(), "polish off needs no polish keys");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_client_url_on_the_unspecified_address_is_refused_by_key() {
+        let dir = tempfile_dir("unspecified_host");
+        let path = dir.join("config.toml");
+        let ok = "http://127.0.0.1:8770/v1";
+        let with = |key: &str, url: &str| match key {
+            "stt.base_url" => format!("[stt]\nbase_url = \"{url}\"\n[polish]\nenabled = false\n"),
+            "stt.by_language.he.base_url" => format!(
+                "[stt]\nbase_url = \"{ok}\"\n[stt.by_language.he]\nbase_url = \"{url}\"\n[polish]\nenabled = false\n"
+            ),
+            "polish.base_url" => format!(
+                "[stt]\nbase_url = \"{ok}\"\n[polish]\nbase_url = \"{url}\"\nmodel = \"m\"\n"
+            ),
+            "tts.base_url" => format!(
+                "[stt]\nbase_url = \"{ok}\"\n[polish]\nenabled = false\n[tts]\nenabled = true\nbase_url = \"{url}\"\n"
+            ),
+            "tts.by_language.he.base_url" => format!(
+                "[stt]\nbase_url = \"{ok}\"\n[polish]\nenabled = false\n[tts]\nenabled = true\nbase_url = \"{ok}\"\n[tts.by_language.he]\nbase_url = \"{url}\"\nvoice = \"v\"\n"
+            ),
+            _ => unreachable!(),
+        };
+        for key in [
+            "stt.base_url",
+            "stt.by_language.he.base_url",
+            "polish.base_url",
+            "tts.base_url",
+            "tts.by_language.he.base_url",
+        ] {
+            for bad in ["http://0.0.0.0:8770/v1", "http://[::]:8770/v1"] {
+                std::fs::write(&path, with(key, bad)).unwrap();
+                let msg = format!("{:#}", load(&path).unwrap_err());
+                assert!(msg.contains(key), "{key}={bad}: {msg}");
+                assert!(msg.contains("use 127.0.0.1"), "{key}={bad}: {msg}");
+            }
+            for good in [ok, "http://192.168.1.20:8770/v1"] {
+                std::fs::write(&path, with(key, good)).unwrap();
+                assert!(load(&path).is_ok(), "{key}={good}");
+            }
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

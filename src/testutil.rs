@@ -5,7 +5,7 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
 enum Reply {
-    Raw(String),
+    Raw(Vec<u8>),
     Close,
     Stall,
 }
@@ -23,7 +23,18 @@ impl MockServer {
     /// Answers every request with this exact response text — for replies a well-formed
     /// server would not produce, such as a `Content-Length` longer than the body sent.
     pub fn start_raw(response: &str) -> MockServer {
-        Self::serve(vec![Reply::Raw(response.to_string())])
+        Self::serve(vec![Reply::Raw(response.as_bytes().to_vec())])
+    }
+
+    /// Answers every request 200 with this WAV body.
+    pub fn start_wav(wav: &[u8]) -> MockServer {
+        let mut reply = format!(
+            "HTTP/1.1 200 X\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            wav.len()
+        )
+        .into_bytes();
+        reply.extend_from_slice(wav);
+        Self::serve(vec![Reply::Raw(reply)])
     }
 
     pub fn start_closing_first(status: u16, body: &str) -> MockServer {
@@ -51,11 +62,12 @@ impl MockServer {
         self.requests.lock().unwrap().clone()
     }
 
-    fn response(status: u16, body: &str) -> String {
+    fn response(status: u16, body: &str) -> Vec<u8> {
         format!(
             "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         )
+        .into_bytes()
     }
 
     /// Serves connection *i* with `replies[i]`; the last entry repeats forever.
@@ -111,7 +123,7 @@ impl MockServer {
                     .push(String::from_utf8_lossy(&raw).to_string());
                 match reply {
                     Reply::Raw(response) => {
-                        let _ = s.write_all(response.as_bytes());
+                        let _ = s.write_all(response);
                     }
                     _ => held.push(s),
                 }

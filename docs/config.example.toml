@@ -136,7 +136,9 @@ args = []
 default = "auto"
 # With default = "auto": restrict detection to these ISO 639-1 codes; every
 # [stt.by_language] code the list lacks is added. Sent as the whisper.cpp-server extension
-# field `language_candidates`; servers without it ignore the field. Empty = not sent.
+# field `language_candidates`; a server without it may ignore the field. One that answers
+# it with a 4xx naming the field gets the dictation again without it, and no field for the
+# rest of the run (one WARN line names the host). Empty = not sent.
 candidates = []
 # Keyboard layout language (ISO 639-1) -> STT language. The layout of the window you
 # are dictating into is read when you press the key. With default = "auto" it is a hint,
