@@ -1,6 +1,6 @@
 //! Explicit manual smoke: select this fixture's text, Ctrl+Alt+R to read, again to stop.
-//! Reading sends Copy to this window and puts the previous clipboard text back; no microphone
-//! or ordinary document is used.
+//! Reading sends Copy to this window and puts the previous clipboard back; no microphone or
+//! ordinary document is used.
 #[cfg(windows)]
 mod probe {
     use byovox::{
