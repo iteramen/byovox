@@ -264,14 +264,14 @@ and checks cancellation and pipeline state again before preparing synthesis. The
 TTS worker retains its own single pending prepared-text slot. Generation fences suppress
 late lookup, playback and UI results. No shared-state lock is held across selection access.
 
-`selected_text_optional` checks the focused element and visible foreground TextPattern providers, addressing
-chat text highlighted while the composer remains focused. It uses only GetSelection ranges, reads
-text only for a non-degenerate range, deduplicates equal ancestor/child ranges and rejects differing
-selections. Range inspection of the filtered UIA TextPattern-provider snapshot is limited to 128 visible providers with a 1.5-second budget checked between providers (not a hard total wall-clock bound); each platform call has a one-second timeout. The query includes edit controls and other roles advertising TextPattern; only their explicit selected ranges are read. Passwords, errors, scan timeouts or a window change refuse without a microphone fallback. A snapshot with more than 128 providers uses guarded Copy when enabled, without iterating its ranges; Copy opt-out preserves the count-limit refusal.
-There is no value or whole-document fallback. Missing/empty UIA selection can use the
-owner-approved, default-on guarded Copy fallback (`tts.copy_fallback = false` opts out).
+`selection_copy::copy_selection` is the selection: it waits for the shortcut's keys to be up,
+checks that the window the shortcut was pressed in is still in front, sends one marked Copy chord
+(Ctrl+C, or Ctrl+Insert in Windows Terminal; other consoles are refused), reads the clipboard's
+text once its sequence number changes, within one second, and puts the previous clipboard text
+back before returning. In Windows Terminal an unchanged clipboard is read as it is, for programs
+that copy on select.
 
-The action dispatcher cancels TTS before forwarding dictation/cancel events. Pending forwarded
+The action dispatcher stops TTS before forwarding a dictation press; Escape does not stop it. Pending forwarded
 pipeline actions remain counted until handled or drained, preventing a subsequent read action
 from starting in the gap before the pipeline has opened its microphone and updated state.
 One serial TTS worker and one pending selection bound work; generation checks fence player,
@@ -298,35 +298,3 @@ null or malformed values. Existing failure handling retains the complete raw tra
 and reports cleanup failure. Servers omitting finish_reason remain compatible; the client
 cannot detect truncation that a server does not report. The failure message contains no
 response text. The output token limit and prompt are unchanged.
-
-
-### Narration UI Automation lifetime
-
-The dedicated selection worker retains one UI Automation client in an explicitly initialized
-COM MTA until that thread exits. Client references are released before the apartment; no
-interface is moved to another thread. An existing STA is refused rather than silently reused.
-Only the client connection persists: selected ranges, elements and text remain request-local.
-There are no accessibility event subscriptions or background document scans. Audio COM setup
-and dictation selection/target behavior are unchanged.
-
-
-### Copy selection transaction
-
-`selection_copy` runs only after the narration UIA guards. Shortcut release precedes UIA access.
-Copy has one scoped worker under the serial selection worker; the persistent UIA/MTA thread never
-owns its hidden message-only clipboard window. The transaction snapshots supported formats,
-checks source/focus/generation, sends one marked Copy chord, accepts only a fresh nonzero-sequence
-Unicode clipboard result, then restores the snapshot before returning text. Helper-process and
-ownerless results are allowed by the owner-approved automatic policy. Sequence/process/owner-HWND checks
-occur under the clipboard lock, so a newer clipboard update is never overwritten. Preparation and
-late-result admission retain the existing generation/pipeline guards. See SECURITY.md for the
-format/size/time limits, failure boundaries and source-defined Copy semantics.
-
-
-Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
-binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
-refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
-Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
-running application when no selection exists. No fresh clipboard result means no
-narration. Custom bindings and application handling of an unhandled chord remain source-app
-behavior; existing clipboard, source/focus and cancellation guards still apply.

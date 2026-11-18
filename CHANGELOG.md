@@ -7,6 +7,13 @@ Each release is a tag; the zip, its `SHA256SUMS` and a build-provenance attestat
 published from it. 0.1.0 to 0.4.0 were released privately, under MIT, before this repository
 went public; their notes are kept below.
 
+## Unreleased
+
+Added
+- Read aloud: select text and press Ctrl+Alt+R to hear it from your own TTS server; press again
+  to stop. byovox copies the selection and puts your clipboard text back. Off until `[tts]` is
+  configured; see the README.
+
 ## 0.6.0 — 2026-11-05
 
 Added

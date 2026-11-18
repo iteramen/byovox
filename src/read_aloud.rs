@@ -16,7 +16,6 @@ pub const MAX_AUDIO: usize = 12 * 1024 * 1024;
 pub struct TtsConfig {
     pub enabled: bool,
     pub hotkey: String,
-    pub copy_fallback: bool,
     pub base_url: String,
     pub model: String,
     pub voice: String,
@@ -43,7 +42,6 @@ impl Default for TtsConfig {
         Self {
             enabled: false,
             hotkey: "ControlLeft+AltLeft+R".into(),
-            copy_fallback: true,
             base_url: String::new(),
             model: "kokoro".into(),
             voice: "af_bella".into(),
@@ -219,22 +217,6 @@ impl TtsConfig {
 }
 
 /// A document and its focused child may report the same selection. Different ranges refuse.
-pub fn unique_selection(
-    selections: impl IntoIterator<Item = Option<String>>,
-) -> Result<Option<String>, String> {
-    let mut result: Option<String> = None;
-    for text in selections.into_iter().flatten() {
-        if text.chars().count() > MAX_TEXT {
-            return Err("Read aloud: selection exceeds 20,000 characters".into());
-        }
-        if result.as_ref().is_some_and(|prior| prior != &text) {
-            return Err("Read aloud: multiple selections found; select one text range".into());
-        }
-        result = Some(text);
-    }
-    Ok(result)
-}
-
 /// Dominant supported script per chunk, not keyboard layout. Unknown dominant scripts are refused.
 pub fn script_language(text: &str) -> Result<&'static str, String> {
     let mut counts = [0usize; 4];
@@ -425,39 +407,8 @@ pub fn synthesize(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn narration_copy_fallback_is_default_and_can_be_disabled() {
-        let defaults = serde_json::to_value(super::TtsConfig::default()).unwrap();
-        assert_eq!(
-            defaults.get("copy_fallback"),
-            Some(&serde_json::Value::Bool(true))
-        );
-        let legacy: super::TtsConfig = serde_json::from_str("{}").unwrap();
-        assert_eq!(serde_json::to_value(legacy).unwrap()["copy_fallback"], true);
-        let opted_out: super::TtsConfig =
-            serde_json::from_str(r#"{"copy_fallback":false}"#).unwrap();
-        assert_eq!(
-            serde_json::to_value(opted_out).unwrap()["copy_fallback"],
-            false
-        );
-    }
-
     use super::*;
     use std::io::Write;
-    #[test]
-    fn document_selection_is_not_lost_when_the_focused_composer_has_only_a_caret() {
-        assert_eq!(
-            unique_selection([None, Some("Selected synthetic chat paragraph".into())]).unwrap(),
-            Some("Selected synthetic chat paragraph".into())
-        );
-        assert_eq!(unique_selection([None, None]).unwrap(), None);
-        assert_eq!(
-            unique_selection([Some("same".into()), Some("same".into())]).unwrap(),
-            Some("same".into())
-        );
-        assert!(unique_selection([Some("first".into()), Some("second".into())]).is_err());
-        assert!(unique_selection([Some("x".repeat(MAX_TEXT + 1))]).is_err());
-    }
     #[test]
     fn narration_defaults_to_a_separate_shortcut_and_refuses_the_same_chord() {
         let mut cfg = TtsConfig {

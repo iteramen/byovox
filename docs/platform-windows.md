@@ -408,48 +408,24 @@ design — that is what it is for.
 ## Read-aloud selection
 
 With TTS enabled, Ctrl+Alt+R is the separate narration shortcut. Empty legacy bindings
-resolve to that chord; overlapping dictation/narration triggers are rejected. Dictation
-never queries selection. A dedicated selection worker keeps UIA calls off the action
-dispatcher, so release/Escape/Disable remain responsive. One pending lookup replaces old
-queued work; generation and pipeline-state checks reject late or busy results.
-Narration stops on another press of its shortcut or when a dictation starts, not on Escape.
-Switching windows after you release the shortcut does not stop it, except that the Copy fallback still needs
-the source window in front while it copies.
+resolve to that chord; overlapping dictation/narration triggers are rejected. A dedicated
+selection worker keeps the Copy off the action dispatcher, so dictation's release, Escape and
+Disable stay responsive. One pending read replaces old queued work; generation and
+pipeline-state checks reject late or busy results. Narration stops on another press of its
+shortcut or when a dictation starts, not on Escape. A failed read logs its message at WARN.
 
-The native RegisterHotKey binding uses no repeat, checks configured modifier sides,
-reports conflicts, releases on Disable and reacquires on Enable. Reading uses the default
-Windows output. Explicit UIA ranges are preferred; missing ranges can use guarded Copy by default.
-Set tts.copy_fallback=false for UIA-only operation; unsupported providers with Copy disabled
-report numeric control-role/provider-count metadata, never text, names or window titles.
+The selection is the app's own Copy. byovox waits until the shortcut's keys are up (a Copy sent
+with Ctrl+Alt held reaches the app as Ctrl+Alt+C), checks that the window the shortcut was
+pressed in is still in front, sends Ctrl+C, and reads the clipboard's text once the clipboard
+changes, within one second. It then puts the previous clipboard text back; only text is
+restored. Windows Terminal (`CASCADIA_HOSTING_WINDOW_CLASS`) gets **Ctrl+Insert**: Ctrl+C there
+interrupts the running program when nothing is selected. With nothing selected, Terminal passes
+Ctrl+Insert on to the program, which may act on it. When the clipboard does not change in
+Windows Terminal, its current text is read: a program that copies on select (herdr) put
+its selection there already, and has no Copy key of its own. Other console hosts (`ConsoleWindowClass`, mintty, ConEmu) are
+refused. Apps decide what their Copy does: some, such as VS Code, copy the current line when
+nothing is selected.
 
-
-### Narration UI Automation lifetime
-
-The dedicated selection worker retains one UI Automation client in an explicitly initialized
-COM MTA until that thread exits. Client references are released before the apartment; no
-interface is moved to another thread. An existing STA is refused rather than silently reused.
-Only the client connection persists: selected ranges, elements and text remain request-local.
-There are no accessibility event subscriptions or background document scans. Audio COM setup
-and dictation selection/target behavior are unchanged.
-
-
-Copy fallback is Windows-only and independent of dictation. It preserves supported clipboard
-formats in RAM, rejects stale contents, checks foreground/focus and cancellation, and
-restores only its own unchanged Copy result. Scintilla editors must expose a nonempty numeric
-selection state; unsupported terminal window classes refuse. Other applications define their Copy
-behavior. Clipboard history/managers/sync can observe the temporary data. Detailed boundaries
-and opt-out are in SECURITY.md and privacy.md; qualification is per application, not universal.
-
-
-Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
-binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
-refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
-Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
-running application when no selection exists. No fresh clipboard result means no
-narration. Custom bindings and application handling of an unhandled chord remain source-app
-behavior; existing clipboard, source/focus and cancellation guards still apply.
-
-Automatic fresh Copy accepts helper-process and ownerless clipboard results when the source
-window and focused control remain unchanged. A fresh result is not proof of provenance: another
-app writing during the Copy interval cannot be excluded. This tradeoff was approved for broad
-app support. Restoration still refuses a changed clipboard sequence or observed owner.
+The native RegisterHotKey binding uses no repeat, checks configured modifier sides, reports
+conflicts, releases on Disable and reacquires on Enable. Reading uses the default Windows
+output.

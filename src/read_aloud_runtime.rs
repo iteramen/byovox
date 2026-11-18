@@ -22,12 +22,7 @@ fn selection(
         let chord = crate::hotkey::parse_chord(config.effective_hotkey())?;
         let trigger = crate::platform::windows::hotkey::vk_for(&chord.trigger)
             .ok_or("Read aloud: invalid shortcut")?;
-        crate::platform::windows::inject::narration_selection(
-            window,
-            config.copy_fallback,
-            trigger,
-            current,
-        )
+        crate::platform::windows::selection_copy::copy_selection(window, trigger, current).map(Some)
     }
     #[cfg(not(windows))]
     {
@@ -62,6 +57,10 @@ fn report(
     let mut snapshot = shared.lock().unwrap_or_else(|p| p.into_inner());
     if generation.load(Ordering::SeqCst) != id {
         return;
+    }
+    if let Some(e) = &error {
+        // Fixed messages and numeric metadata only, never selected text.
+        tracing::warn!(error = %e, "read aloud failed");
     }
     snapshot.last_error = error;
     drop(snapshot);
@@ -418,7 +417,7 @@ mod tests {
             )
         });
         entered.wait();
-        // The slow provider owns no shared-state lock: stop/recording can progress immediately.
+        // The slow lookup holds no shared-state lock: stop/recording can progress immediately.
         shared
             .try_lock()
             .expect("lookup must not hold the dispatcher state")

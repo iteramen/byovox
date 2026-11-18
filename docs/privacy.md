@@ -1,6 +1,6 @@
 # Privacy policy — byovox
 
-**Effective: 2026-11-09 (read-aloud implementation draft).**
+**Effective: 2026-11-18.**
 
 byovox is a Windows push-to-talk dictation tool. You hold a hotkey, speak, release, and the
 transcript is typed into the window you were in. byovox runs no server of its own and has no
@@ -225,71 +225,29 @@ also welcome as [GitHub issues](https://github.com/iteramen/byovox/issues).
 
 ## Optional read aloud
 
-With `[tts].enabled = true`, Ctrl+Alt+R reads explicitly selected text by default.
-Dictation has a separate shortcut; empty legacy narration bindings resolve to Ctrl+Alt+R.
-Another narration press stops reading. Selection discovery runs on one bounded worker,
-with enabled/busy/generation checks before and after lookup. On the explicit gesture,
-Windows UI Automation checks the focused control and visible
-foreground text-selection providers. It inspects ranges from a filtered UIA TextPattern-provider snapshot only when it contains at most 128 visible providers, with a 1.5-second budget checked between providers
-(each platform call has a one-second timeout; this is not a hard total-time bound). GetText is used
-only for a non-degenerate selected range. Password fields, conflicting ranges, provider errors or scan timeouts
-or a changed window refuse the action without opening the microphone. It never reads document contents as a fallback. When UIA supplies no selection or the snapshot exceeds 128 providers, default-on
-`tts.copy_fallback` uses the app's Copy command under the guards below. The selected range or
-app-provided Copy result goes
-to your configured TTS endpoint, in chunks, with model, voice and speed (`read_aloud::synthesize`).
-The TTS server can retain it under its own policy. HTTPS verifies certificates; remote HTTP is
-possible and `byovox check` warns about it. Use a trusted encrypted connection for private text.
+With `[tts].enabled = true`, Ctrl+Alt+R reads the selected text aloud; dictation keeps its own
+shortcut. When you release the shortcut, byovox sends the app its Copy keys (Ctrl+C, or
+Ctrl+Insert in Windows Terminal), takes the text from the clipboard and puts your previous
+clipboard text back. While it is there, Windows clipboard history, cloud clipboard and clipboard
+managers can keep it; putting your text back does not undo that. Only text is put back: if the
+clipboard held an image or files, it holds the copied text afterwards. Nothing selected means
+nothing is read, except in Windows Terminal, where the clipboard's current text is read: a
+program that copies on select, such as herdr, has already put its selection there.
+
+The text goes to your configured TTS endpoint, in chunks, with model, voice and speed
+(`read_aloud::synthesize`). The TTS server can retain it under its own policy. HTTPS verifies
+certificates; remote HTTP is possible and `byovox check` warns about it. Use a trusted encrypted
+connection for private text.
 
 TTS credentials are separate from STT/cleanup. A language lane receives only its own configured
 token unless `inherit_token = true` explicitly selects the default TTS credential. Requests follow
 no redirects. Selected text, generated audio and server response bodies are never written to logs,
-files, capture history or `byovox last`, even at debug level. Copy fallback temporarily exposes
-text on the clipboard; generated audio is never placed there. Only fixed status and
-failure messages are shown. The TOML retains non-secret TTS configuration and token references.
+files, capture history or `byovox last`, even at debug level. Only fixed status and failure
+messages are shown, and a failure is logged with that message alone. The TOML retains non-secret
+TTS configuration and token references.
 
-The shortcut toggles reading; Disable or starting dictation cancels it, Escape does not. Audio stops and
-late replies are discarded, though a request already received by the server can finish there.
-Reading never opens the microphone or injects text. Hebrew/Russian configuration slots require
-supported voices and do not reuse an English voice silently. Dominant script chooses the route,
-so Latin-script text uses the English/default route rather than a semantic language detector.
-
-
-### Narration UI Automation lifetime
-
-The dedicated selection worker retains one UI Automation client in an explicitly initialized
-COM MTA until that thread exits. Client references are released before the apartment; no
-interface is moved to another thread. An existing STA is refused rather than silently reused.
-Only the client connection persists: selected ranges, elements and text remain request-local.
-There are no accessibility event subscriptions or background document scans. Audio COM setup
-and dictation selection/target behavior are unchanged.
-
-
-### Clipboard use for narration
-
-The owner chose broad app compatibility with guarded Copy fallback enabled by default. Set
-`[tts].copy_fallback = false` to keep accessibility-only narration. When used, Copy temporarily
-puts the source app's selected/copied text on the shared Windows clipboard. Clipboard managers,
-history and cloud synchronization can retain it; restoring the previous clipboard cannot undo
-that. The original clipboard snapshot is held only in RAM, bounded to 64 supported formats/8 MiB.
-Unsupported clipboard formats refuse before Copy. Newer clipboard updates are never overwritten.
-
-This path never cuts, pastes or selects all. It rejects stale copies, password controls,
-unsupported terminals and source changes. Scintilla/Notepad++ empty selections are checked explicitly.
-Other apps can define Copy as current-line copying when nothing is selected: select the intended
-text before invoking narration. Cancellation prevents TTS but still attempts to restore any Copy
-result already produced. Timeout/restore failure can leave copied text on the clipboard and is
-reported; clipboard content is never logged or saved in byovox history. See SECURITY.md for limits.
-
-
-Windows Terminal's `CASCADIA_HOSTING_WINDOW_CLASS` uses its standard **Ctrl+Insert** Copy
-binding; ordinary desktop applications retain Ctrl+C. Other recognized terminal hosts remain
-refused. No Ctrl+C, Ctrl+Shift+C, Enter, paste or select-all is injected into Windows Terminal.
-Select text first and keep Ctrl+Insert bound to Copy: Terminal forwards the key chord to the
-running application when no selection exists. No fresh clipboard result means no
-narration. Custom bindings and application handling of an unhandled chord remain source-app
-behavior; existing clipboard, source/focus and cancellation guards still apply.
-
-Automatic fresh Copy accepts helper-process and ownerless clipboard results when the source
-window and focused control remain unchanged. A fresh result is not proof of provenance: another
-app writing during the Copy interval cannot be excluded. This tradeoff was approved for broad
-app support. Restoration still refuses a changed clipboard sequence or observed owner.
+Another press of the shortcut, or starting a dictation, stops reading; Escape does not. Audio
+stops and late replies are discarded, though a request already received by the server can finish
+there. Reading never opens the microphone. Hebrew/Russian configuration slots require supported
+voices and do not reuse an English voice silently. Dominant script chooses the route, so
+Latin-script text uses the English/default route rather than a semantic language detector.
