@@ -92,6 +92,7 @@ fn main() {
         Some(Cmd::Run) => daemon::run(daemon::Options {
             config_path: given,
             log_to_stderr: true,
+            wait_for_previous: false,
         }),
         Some(Cmd::Toggle) => relay(ipc::Request::Toggle),
         Some(Cmd::Quit) => relay(ipc::Request::Quit),
