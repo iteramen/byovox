@@ -190,7 +190,8 @@ fn spawn_daemon(config: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-/// Every refusal comes before the daemon is stopped. The daemon is started again either way.
+/// Every refusal comes before the daemon is stopped. Once the pair is staged, the daemon is started
+/// whether or not the swap succeeded.
 fn update_cmd(config: Option<PathBuf>) -> Result<()> {
     if !cfg!(windows) {
         bail!("byovox update is Windows-only for now");
@@ -201,6 +202,7 @@ fn update_cmd(config: Option<PathBuf>) -> Result<()> {
     let new = update::stage(
         &deploy::agent(),
         update::LATEST_URL,
+        &update::release_download,
         current,
         dir,
         &std::env::temp_dir(),
@@ -212,7 +214,12 @@ fn update_cmd(config: Option<PathBuf>) -> Result<()> {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while ipc::daemon_running(&socket) {
             if std::time::Instant::now() >= deadline {
-                bail!("the daemon did not stop within 10 s; nothing was replaced");
+                for name in ["byovox.exe", "byovox-daemon.exe"] {
+                    let _ = std::fs::remove_file(dir.join(format!("{name}.new")));
+                }
+                bail!(
+                    "the daemon did not stop within 10 s; nothing was replaced. It was asked to                      quit and may still stop: run `byovox` to start it again"
+                );
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -221,7 +228,12 @@ fn update_cmd(config: Option<PathBuf>) -> Result<()> {
     let started = spawn_daemon(config);
     swapped.map_err(anyhow::Error::msg)?;
     println!("byovox updated: {current} -> {new}");
-    started
+    started.with_context(|| {
+        format!(
+            "the {new} daemon did not start; to go back to {current}, rename byovox.exe.old and              byovox-daemon.exe.old in {} over the new pair",
+            dir.display()
+        )
+    })
 }
 
 fn relay(req: ipc::Request) -> Result<()> {

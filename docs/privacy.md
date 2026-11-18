@@ -145,7 +145,8 @@ running daemon over a named pipe on your computer (`src/ipc.rs` — `socket_name
 
 byovox has no installer. Deleting `%APPDATA%\byovox` and `%LOCALAPPDATA%\byovox`, and running
 `byovox autostart --disable`, removes everything it stored, except a `capture_log.dir` you set
-elsewhere.
+elsewhere and the previous pair, `byovox.exe.old` and `byovox-daemon.exe.old`, that `byovox
+update` leaves beside the exes.
 
 ## What is not collected
 

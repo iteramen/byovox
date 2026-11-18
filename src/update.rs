@@ -12,6 +12,11 @@ use crate::deploy;
 
 pub const LATEST_URL: &str = "https://api.github.com/repos/iteramen/byovox/releases/latest";
 
+/// Where a release's assets are fetched from: built from the tag, never read from the API reply.
+pub fn release_download(tag: &str, name: &str) -> String {
+    format!("https://github.com/iteramen/byovox/releases/download/{tag}/{name}")
+}
+
 const DAY: u64 = 24 * 60 * 60;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -45,7 +50,6 @@ struct Latest {
 #[derive(Deserialize)]
 struct Asset {
     name: String,
-    browser_download_url: String,
     size: u64,
 }
 
@@ -188,6 +192,7 @@ fn latest(agent: &ureq::Agent, url: &str) -> Result<Latest, String> {
 pub fn stage(
     agent: &ureq::Agent,
     url: &str,
+    download: &dyn Fn(&str, &str) -> String,
     current: &str,
     dir: &Path,
     scratch: &Path,
@@ -224,9 +229,9 @@ pub fn stage(
             .ok_or_else(|| format!("release {tag} has no {name}"))
     };
     let zip = asset(&zip_name)?;
-    let sums = asset("SHA256SUMS")?;
+    asset("SHA256SUMS")?;
     let sums = agent
-        .get(&sums.browser_download_url)
+        .get(download(tag, "SHA256SUMS"))
         .call()
         .and_then(|mut r| r.body_mut().read_to_string())
         .map_err(|e| format!("SHA256SUMS: {e}"))?;
@@ -234,7 +239,7 @@ pub fn stage(
         .ok_or_else(|| format!("SHA256SUMS has no checksum for {zip_name}"))?;
     // Leaked into a `Pin`, whose fields are 'static; the command exits after one update.
     let pin = deploy::Pin {
-        url: zip.browser_download_url.clone().leak(),
+        url: download(tag, &zip_name).leak(),
         bytes: zip.size,
         sha256: sha256.leak(),
     };
@@ -594,14 +599,14 @@ mod tests {
         let listed: Vec<String> = assets
             .iter()
             .map(|name| {
-                let (srv, size) = if *name == "SHA256SUMS" {
-                    (&sums_srv, sums.len())
+                let size = if *name == "SHA256SUMS" {
+                    sums.len()
                 } else {
-                    (&zip_srv, zip.len())
+                    zip.len()
                 };
+                // A URL the update must not use: it builds its own from the tag.
                 format!(
-                    r#"{{"name":"{name}","browser_download_url":"{}/{name}","size":{size}}}"#,
-                    srv.url()
+                    r#"{{"name":"{name}","browser_download_url":"https://elsewhere.invalid/{name}","size":{size}}}"#
                 )
             })
             .collect();
@@ -614,6 +619,27 @@ mod tests {
             zip: zip_srv,
             sums: sums_srv,
         }
+    }
+
+    impl Loopback {
+        fn at(&self) -> impl Fn(&str, &str) -> String + '_ {
+            move |_, name| {
+                let srv = if name == "SHA256SUMS" {
+                    &self.sums
+                } else {
+                    &self.zip
+                };
+                format!("{}/{name}", srv.url())
+            }
+        }
+    }
+
+    #[test]
+    fn assets_are_fetched_from_the_release_tag_on_github() {
+        assert_eq!(
+            release_download("v0.8.0", "SHA256SUMS"),
+            "https://github.com/iteramen/byovox/releases/download/v0.8.0/SHA256SUMS"
+        );
     }
 
     /// An install folder holding the old pair, and a scratch folder beside it.
@@ -660,7 +686,7 @@ mod tests {
         let zip = release_zip();
         let sums = format!("{}  other.zip\n{}", sha256_hex(b"other"), sums_for(&zip));
         let rel = loopback(&release("v0.4.0"), &zip, &sums, &[ZIP, "SHA256SUMS"]);
-        let got = stage(&plain(), rel.api.url(), "0.3.0", &dir, &scratch);
+        let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
         assert_eq!(got.as_deref(), Ok("0.4.0"));
         assert_eq!(rel.zip.requests().len(), 1);
         assert_eq!(rel.sums.requests().len(), 1);
@@ -690,7 +716,7 @@ mod tests {
             &sums_for(b"some other zip"),
             &[ZIP, "SHA256SUMS"],
         );
-        let got = stage(&plain(), rel.api.url(), "0.3.0", &dir, &scratch);
+        let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
         let (in_dir, in_scratch) = (files(&dir), files(&scratch));
         std::fs::remove_dir_all(&root).unwrap();
         let e = got.unwrap_err();
@@ -730,7 +756,7 @@ mod tests {
         for (case, zip, sums, assets, named) in cases {
             let (root, dir, scratch) = installed(&format!("missing-{}", case.replace(' ', "-")));
             let rel = loopback(&release("v0.4.0"), zip, &sums, &assets);
-            let got = stage(&plain(), rel.api.url(), "0.3.0", &dir, &scratch);
+            let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
             let in_dir = files(&dir);
             std::fs::remove_dir_all(&root).unwrap();
             let e = got.unwrap_err();
@@ -749,7 +775,7 @@ mod tests {
                 base = base.replace(r#""prerelease":false"#, r#""prerelease":true"#);
             }
             let rel = loopback(&base, &zip, &sums_for(&zip), &[ZIP, "SHA256SUMS"]);
-            let got = stage(&plain(), rel.api.url(), "0.3.0", &dir, &scratch);
+            let got = stage(&plain(), rel.api.url(), &rel.at(), "0.3.0", &dir, &scratch);
             let in_dir = files(&dir);
             std::fs::remove_dir_all(&root).unwrap();
             let e = got.unwrap_err();
@@ -770,7 +796,14 @@ mod tests {
                 std::fs::write(bin.join(exe), "cargo build").unwrap();
             }
             let api = MockServer::start(200, &release("v0.4.0"));
-            let got = stage(&plain(), api.url(), "0.3.0", &bin, &scratch);
+            let got = stage(
+                &plain(),
+                api.url(),
+                &release_download,
+                "0.3.0",
+                &bin,
+                &scratch,
+            );
             std::fs::remove_dir_all(&root).unwrap();
             let e = got.unwrap_err();
             assert!(e.contains(CARGO_INSTALL), "{manifest}: {e}");
@@ -779,7 +812,14 @@ mod tests {
         let (root, dir, scratch) = installed("no-daemon");
         std::fs::remove_file(dir.join("byovox-daemon.exe")).unwrap();
         let api = MockServer::start(200, &release("v0.4.0"));
-        let got = stage(&plain(), api.url(), "0.3.0", &dir, &scratch);
+        let got = stage(
+            &plain(),
+            api.url(),
+            &release_download,
+            "0.3.0",
+            &dir,
+            &scratch,
+        );
         std::fs::remove_dir_all(&root).unwrap();
         assert!(got.unwrap_err().contains("byovox-daemon.exe is not in"));
         assert!(api.requests().is_empty());
@@ -789,7 +829,14 @@ mod tests {
     fn the_real_agent_refuses_a_plain_http_release() {
         let (root, dir, scratch) = installed("https-only");
         let api = MockServer::start(200, &release("v0.4.0"));
-        let got = stage(&deploy::agent(), api.url(), "0.3.0", &dir, &scratch);
+        let got = stage(
+            &deploy::agent(),
+            api.url(),
+            &release_download,
+            "0.3.0",
+            &dir,
+            &scratch,
+        );
         std::fs::remove_dir_all(&root).unwrap();
         assert!(got.is_err(), "{got:?}");
         assert!(api.requests().is_empty(), "a request reached the server");
