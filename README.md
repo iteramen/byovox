@@ -129,6 +129,24 @@ Want it running at login, or stuck on any of the above? The full Windows walkthr
 whisper server step by step, models, autostart — is in
 [docs/platform-windows.md](docs/platform-windows.md).
 
+## Update
+
+For byovox unzipped from a release:
+
+1. Run `byovox update`. It downloads the latest release's zip and `SHA256SUMS` from GitHub over
+   HTTPS, and stops without changing anything if the zip does not match its checksum, an asset
+   is missing, or that release is not newer than yours.
+2. It stops byovox, puts the new `byovox.exe` and `byovox-daemon.exe` in place of yours, starts
+   byovox, and prints the old and new version. If a file cannot be replaced, the old pair is put
+   back. The previous pair stays beside the new one as `byovox.exe.old` and
+   `byovox-daemon.exe.old`.
+3. Run `byovox --version` to see the new version.
+
+Your config in `%APPDATA%\byovox\config` is not touched. If you start byovox with `--config`,
+give `byovox update` the same one, so byovox starts on it. Installed with `cargo install`?
+`byovox update` refuses; re-run the `cargo install` line from
+[Install byovox](#3-install-byovox) instead.
+
 ## When something's off
 
 ```sh
@@ -167,6 +185,7 @@ is the healthy result, not a broken server.
 | `byovox last` | print the last thing you dictated |
 | `byovox quit` | stop it |
 | `byovox autostart --enable` | start at login (setup turns it on; the tray's Run on startup turns it off) |
+| `byovox update` | install the latest release over this one ([Update](#update)) |
 
 Everything else: `byovox --help`.
 
@@ -216,10 +235,11 @@ layout mapped to it when whisper is unsure.
   point byovox at servers you run, or at a hosted service you chose knowing it sees your
   audio or your text. `byovox check` prints a `note hosted` row for each stage you marked and will actually call.
 - **Nothing is recorded by default.** No key logging, no saved audio, no telemetry. Beyond the
-  servers you configure, and the whisper.cpp download `byovox setup` makes only if you say yes,
-  byovox makes **one anonymous version request to api.github.com per day**, when the daemon
-  starts, so the tray can say when a newer release exists. That request downloads and installs
-  nothing, and `update.check = false` turns it off. Turn on `capture_log`
+  servers you configure, the whisper.cpp download `byovox setup` makes only if you say yes, and
+  the release `byovox update` downloads when you run it, byovox makes **one anonymous version
+  request to api.github.com per day**, when the daemon starts, so the tray can say when a newer
+  release exists. That request downloads and installs nothing, and `update.check = false` turns
+  it off. Turn on `capture_log`
   yourself if you want copies. Everything byovox sends and stores: [docs/privacy.md](docs/privacy.md).
 - **No secrets in the config file.** It holds the *name* of an environment variable, never a
   token.
