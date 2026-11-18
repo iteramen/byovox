@@ -213,7 +213,8 @@ stderr under `byovox run`. INFO is one line per dictation; only DEBUG carries tr
 
 **`byovox check`** ([src/check.rs](../src/check.rs)) runs what the daemon would: config, a
 warning per plain-HTTP remote endpoint, hosted notes, update setting, `[stt.server]`, hotkey,
-backends and rungs, a 1 s microphone sample and its level, layout and resolved policy, an STT
+with `[tts]` enabled one read-aloud request of a fixed phrase per lane with a voice (`tts`,
+`tts[<code>]`; the reply is decoded, never played), backends and rungs, a 1 s microphone sample and its level, layout and resolved policy, an STT
 round trip plus one per lane (`stt[<code>]`), a polish round trip through the daemon's exact
 prompt, an inject dry run. It exits non-zero when a required stage fails; `warn` and `note`
 rows never do.

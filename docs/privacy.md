@@ -67,7 +67,11 @@ them (`src/config.rs` — `SttConfig`, `PolishConfig`). Once you do:
 - **`byovox check`.** It sends its 1-second recording to your speech server and to every lane,
   and the fixed sentence `um so this is uh a test` to the cleanup server when that is enabled, and
   prints the first 60 characters of each reply on the console (`src/check.rs` — `run`,
-  `stt_round_trip`, `polish_round_trip`). The tray's *Run check* runs the same command.
+  `stt_round_trip`, `polish_round_trip`). With read aloud enabled, it sends one fixed phrase to
+  the English TTS lane and to each Hebrew or Russian lane with a voice, with the token a read
+  would send, and prints the request time and the audio's length, or the error a read would
+  show; the audio is not played
+  (`src/check.rs` — `TTS_PHRASES`, `tts_rows`). The tray's *Run check* runs the same command.
 - **`byovox setup`.** It tests the servers you name with one second of digital silence and the
   same fixed sentence (`check::probe_stt`, `probe_polish`), and ends by running `byovox check`.
   It asks a local Ollama at `http://127.0.0.1:11434/api/tags` which models it has

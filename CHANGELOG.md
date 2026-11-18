@@ -12,6 +12,9 @@ went public; their notes are kept below.
 Added
 - A Restart item in the tray menu applies a config edit without quitting and starting byovox
   by hand. A config that does not validate is reported, and the running byovox keeps going.
+- With read aloud on, `byovox check` and the tray's Run check send a short fixed phrase to each
+  TTS lane in use and print a `tts`, `tts[he]` or `tts[ru]` row: the request time and the
+  audio's length, or the error a read would show.
 
 Changed
 - A dictation of room tone with a few taps or clicks is discarded as silent before any request,
