@@ -9,6 +9,10 @@ went public; their notes are kept below.
 
 ## Unreleased
 
+Added
+- A Restart item in the tray menu applies a config edit without quitting and starting byovox
+  by hand. A config that does not validate is reported, and the running byovox keeps going.
+
 Changed
 - A dictation of room tone with a few taps or clicks is discarded as silent before any request,
   instead of being typed as whatever whisper made of it (`*crickets*`). The test is now the
